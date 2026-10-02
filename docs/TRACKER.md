@@ -26,7 +26,13 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
 - [x] CurveCreated event so an indexer can see new tokens
 - [x] Indexer built and tested against the local chain (web/src/lib/indexer.ts, tests/indexer.cts): tokens, trades, claims, no repeated work.
       Supabase schema in supabase/migrations/0001_init.sql, server route /api/index (needs CRON_SECRET), site reads trades from Supabase when configured.
-- [x] Tests: 18 on-chain (yarn test), 18 math (cargo test)
+- [x] Platform fee (1%) on every trade, locked in per token at launch; changeable (max 2%) for NEW tokens only; accrues per token; anyone can send it to the treasury
+- [x] Pause switch (admin only): blocks new buys and new tokens, never sells or reward claims
+- [x] Two-step admin handover (propose, then accept) and a command line admin tool: scripts/admin.cjs
+- [x] Site shows the platform fee line, a paused banner, disabled Buy while paused, and a notice on the Launch page
+- [x] Indexer and database record the platform fee (migration 0002 applied to the hodl project)
+- [x] Program size trimmed to 351,944 bytes (size-optimized build, manual upgrade-authority check)
+- [x] Tests: 24 on-chain (yarn test), 19 math (cargo test)
 
 ## Open: security and correctness
 - [ ] LOW  Reward flash-hold: tokens moved out and back by plain transfer still earn while away.
@@ -42,6 +48,9 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
 - [ ] HIGH (before mainnet) Professional audit, legal review, multisig upgrade authority
 
 - [ ] UX  A wallet that moves all its tokens away forfeits rewards it had not claimed yet. Site must warn: claim before moving tokens
+
+- [ ] PARKED (decided: not needed initially): put the upgrade authority, admin and treasury under a multisig. Guide ready in docs/MULTISIG.md. Until then ONE wallet controls upgrades and the admin powers. Do before mainnet.
+- [ ] Devnet still runs the OLD program (no Config, no platform fee, no pause, no CurveCreated event). To update: extend the program by about 17 KB (about 0.12 devnet SOL), upgrade, then run: node scripts/admin.cjs init <treasury> 100 --yes with RPC_URL set to devnet.
 
 ## Open: product
 - [ ] Richer home page: totals strip, token cards with sparkline, activity ticker

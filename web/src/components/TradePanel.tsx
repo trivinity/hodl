@@ -9,7 +9,7 @@ import {
   getTokenBalance,
   walletProgram,
 } from "@/lib/program";
-import { buyQuote, decayTaxBps, sellQuote, weightedAvgTs, rewardShare, rewardDistributed, rewardOwed, holderFeePart, TOKEN_UNIT } from "@/lib/curve";
+import { buyQuote, decayTaxBps, sellQuote, weightedAvgTs, rewardShare, rewardDistributed, rewardOwed, splitFee, TOKEN_UNIT } from "@/lib/curve";
 import { duration, sol, tokens } from "@/lib/format";
 import { friendlyError } from "@/lib/errors";
 
@@ -17,15 +17,18 @@ type Props = {
   curve: CurveView;
   onTraded: () => void;
   onHeld: (heldSecs: number | null) => void;
+  /** true when the admin has paused new buys and new tokens */
+  paused?: boolean;
 };
 
 const pct = (bps: number) => (bps / 100).toFixed(bps % 100 === 0 ? 0 : 2);
 
-export default function TradePanel({ curve, onTraded, onHeld }: Props) {
+export default function TradePanel({ curve, onTraded, onHeld, paused = false }: Props) {
   const { connection } = useConnection();
   const wallet = useAnchorWallet();
   const [mode, setMode] = useState<"buy" | "sell">("buy");
   const [amount, setAmount] = useState("");
+  const totalFeeBps = curve.feeBps + curve.holderFeeBps + curve.platformFeeBps;
   const [balance, setBalance] = useState<bigint>(0n);
   const [pos, setPos] = useState<PositionView | null>(null);
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
@@ -112,13 +115,13 @@ export default function TradePanel({ curve, onTraded, onHeld }: Props) {
 
   const buyQ = useMemo(() => {
     if (mode !== "buy" || parsed === null) return null;
-    return buyQuote(curve.vs, curve.vt, curve.realTokens, BigInt(Math.round(parsed * 1e9)), BigInt(curve.feeBps + curve.holderFeeBps));
-  }, [mode, parsed, curve]);
+    return buyQuote(curve.vs, curve.vt, curve.realTokens, BigInt(Math.round(parsed * 1e9)), BigInt(totalFeeBps));
+  }, [mode, parsed, curve, totalFeeBps]);
 
   const sellTokens = useMemo(() => (mode === "sell" && parsed !== null ? BigInt(Math.round(parsed * Number(TOKEN_UNIT))) : null), [mode, parsed]);
   const sellQ = useMemo(() => {
     if (sellTokens === null || sellTokens <= 0n) return null;
-    const q = sellQuote(curve.vs, curve.vt, sellTokens, BigInt(curve.feeBps + curve.holderFeeBps));
+    const q = sellQuote(curve.vs, curve.vt, sellTokens, BigInt(totalFeeBps));
     if (!q) return null;
     const tax = (q.gross * BigInt(taxBps)) / 10_000n;
     return { ...q, tax, receive: q.net - tax };
@@ -241,17 +244,24 @@ export default function TradePanel({ curve, onTraded, onHeld }: Props) {
             {curve.feeBps > 0 && (
               <div>
                 <dt>Fee to creator ({pct(curve.feeBps)}%)</dt>
-                <dd>{buyQ ? `${sol(buyQ.fee - holderFeePart(buyQ.fee, curve.feeBps, curve.holderFeeBps), 5)} SOL` : "–"}</dd>
+                <dd>{buyQ ? `${sol(splitFee(buyQ.fee, curve.feeBps, curve.holderFeeBps, curve.platformFeeBps).creator, 5)} SOL` : "–"}</dd>
               </div>
             )}
             {curve.holderFeeBps > 0 && (
               <div>
                 <dt>Fee to holders ({pct(curve.holderFeeBps)}%)</dt>
-                <dd>{buyQ ? `${sol(holderFeePart(buyQ.fee, curve.feeBps, curve.holderFeeBps), 5)} SOL` : "–"}</dd>
+                <dd>{buyQ ? `${sol(splitFee(buyQ.fee, curve.feeBps, curve.holderFeeBps, curve.platformFeeBps).holders, 5)} SOL` : "–"}</dd>
+              </div>
+            )}
+            {curve.platformFeeBps > 0 && (
+              <div>
+                <dt>Platform fee ({pct(curve.platformFeeBps)}%)</dt>
+                <dd>{buyQ ? `${sol(splitFee(buyQ.fee, curve.feeBps, curve.holderFeeBps, curve.platformFeeBps).platform, 5)} SOL` : "–"}</dd>
               </div>
             )}
           </dl>
-          <button className="btn btn-buy btn-block" disabled={!wallet || busy || !buyQ} onClick={submit}>
+          {paused && <p className="notice notice-bad">New buys are paused right now. You can still sell and claim rewards.</p>}
+          <button className="btn btn-buy btn-block" disabled={!wallet || busy || !buyQ || paused} onClick={submit}>
             {!wallet ? "Connect a wallet" : busy ? "Waiting for wallet…" : "Buy"}
           </button>
         </>
@@ -305,13 +315,19 @@ export default function TradePanel({ curve, onTraded, onHeld }: Props) {
             {curve.feeBps > 0 && (
               <div>
                 <dt>Fee to creator ({pct(curve.feeBps)}%)</dt>
-                <dd>{sellQ ? `${sol(sellQ.fee - holderFeePart(sellQ.fee, curve.feeBps, curve.holderFeeBps), 5)} SOL` : "–"}</dd>
+                <dd>{sellQ ? `${sol(splitFee(sellQ.fee, curve.feeBps, curve.holderFeeBps, curve.platformFeeBps).creator, 5)} SOL` : "–"}</dd>
               </div>
             )}
             {curve.holderFeeBps > 0 && (
               <div>
                 <dt>Fee to holders ({pct(curve.holderFeeBps)}%)</dt>
-                <dd>{sellQ ? `${sol(holderFeePart(sellQ.fee, curve.feeBps, curve.holderFeeBps), 5)} SOL` : "–"}</dd>
+                <dd>{sellQ ? `${sol(splitFee(sellQ.fee, curve.feeBps, curve.holderFeeBps, curve.platformFeeBps).holders, 5)} SOL` : "–"}</dd>
+              </div>
+            )}
+            {curve.platformFeeBps > 0 && (
+              <div>
+                <dt>Platform fee ({pct(curve.platformFeeBps)}%)</dt>
+                <dd>{sellQ ? `${sol(splitFee(sellQ.fee, curve.feeBps, curve.holderFeeBps, curve.platformFeeBps).platform, 5)} SOL` : "–"}</dd>
               </div>
             )}
             <div>

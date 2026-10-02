@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import dynamic from "next/dynamic";
 import { CLUSTER_LABEL } from "@/lib/program";
+import { useConfig } from "@/lib/useConfig";
 
 // the wallet button reads window state, so it only renders in the browser
 const WalletMultiButton = dynamic(
@@ -42,7 +43,14 @@ function SolBalance() {
 }
 
 export default function Header() {
+  const config = useConfig();
   return (
+    <>
+    {config?.paused && (
+      <div className="banner" role="status">
+        New buys and new tokens are paused right now. Selling and claiming rewards still work.
+      </div>
+    )}
     <header className="top">
       <Link href="/" className="wordmark" aria-label="HODL home">
         HODL
@@ -57,5 +65,6 @@ export default function Header() {
       <SolBalance />
       <WalletMultiButton />
     </header>
+    </>
   );
 }

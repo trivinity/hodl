@@ -50,6 +50,7 @@ describe("indexer", () => {
     assert.equal(curves.length, 1, "one CurveCreated row");
     assert.equal(curves[0].symbol, "IDX");
     assert.equal(curves[0].holder_fee_bps, 100);
+    assert.equal(curves[0].platform_fee_bps, 100, "the token records the platform fee it launched with");
     assert.equal(curves[0].creator, creator.publicKey.toBase58());
 
     assert.equal(trades.length, 3, "two buys and one sell");
@@ -59,6 +60,8 @@ describe("indexer", () => {
     assert.isAbove(sell.rewards, 0);
     assert.isAbove(trades.find((t: any) => t.is_buy).fee_to_holders, -1);
     assert.equal(sell.trader, bot.publicKey.toBase58());
+    assert.isAbove(sell.fee_to_platform, 0, "every trade pays the platform fee");
+    assert.isTrue(trades.every((t: any) => t.fee_to_platform > 0));
     // the first buy has no other holder to pay, so its holder fee goes to the creator; the second buy pays the first buyer
     assert.isAbove(trades.filter((t: any) => t.is_buy).reduce((a: number, t: any) => a + t.fee_to_holders, 0), 0);
 

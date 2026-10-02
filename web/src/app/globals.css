@@ -1121,3 +1121,12 @@ input:focus {
     gap: 36px;
   }
 }
+
+.banner {
+  background: var(--sell-soft);
+  color: var(--sell);
+  text-align: center;
+  font-size: 14px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+}

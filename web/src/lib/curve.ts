@@ -56,6 +56,19 @@ export function holderFeePart(fee: bigint, creatorBps: number, holderBps: number
   return total === 0n ? 0n : (fee * BigInt(holderBps)) / total;
 }
 
+/** platform part of a trade fee: fee * platform_bps / total_bps (mirrors platform_fee_part in math.rs) */
+export function platformFeePart(fee: bigint, totalBps: number, platformBps: number): bigint {
+  return totalBps === 0 ? 0n : (fee * BigInt(platformBps)) / BigInt(totalBps);
+}
+
+/** how a trade fee is shared: platform first, then holders and creator split the rest (mirrors the program) */
+export function splitFee(fee: bigint, creatorBps: number, holderBps: number, platformBps: number) {
+  const platform = platformFeePart(fee, creatorBps + holderBps + platformBps, platformBps);
+  const rest = fee - platform;
+  const holders = holderFeePart(rest, creatorBps, holderBps);
+  return { platform, holders, creator: rest - holders };
+}
+
 export const ACC_SCALE = 1_000_000_000_000n;
 export const MIN_REWARD_TRACKED = 1_000_000n;
 

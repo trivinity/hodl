@@ -28,6 +28,18 @@ export function walletProgram(connection: Connection, wallet: anchor.Wallet): an
   return new anchor.Program(idl, provider);
 }
 
+export function configPda() {
+  return PublicKey.findProgramAddressSync([Buffer.from("config")], PROGRAM_ID)[0];
+}
+
+export type ConfigView = { admin: string; treasury: string; platformFeeBps: number; paused: boolean };
+
+/** global settings: whether trading is paused and the platform fee for new tokens. null if the program was never set up */
+export async function getConfig(program: anchor.Program<any>): Promise<ConfigView | null> {
+  const c = await (program.account as any).config.fetchNullable(configPda());
+  return c ? { admin: c.admin.toBase58(), treasury: c.treasury.toBase58(), platformFeeBps: c.platformFeeBps, paused: c.paused } : null;
+}
+
 export function curvePda(mint: PublicKey) {
   return PublicKey.findProgramAddressSync([Buffer.from("curve"), mint.toBuffer()], PROGRAM_ID)[0];
 }
@@ -51,6 +63,7 @@ export type CurveView = {
   realTokens: bigint;
   feeBps: number;
   holderFeeBps: number;
+  platformFeeBps: number;
   maxTaxBps: number;
   decaySecs: number;
   holderSellBps: number;
@@ -79,6 +92,7 @@ export function toCurveView(address: PublicKey, c: any): CurveView {
     realTokens: b(c.realTokens),
     feeBps: c.feeBps,
     holderFeeBps: c.holderFeeBps,
+    platformFeeBps: c.platformFeeBps,
     maxTaxBps: c.maxTaxBps,
     decaySecs: Number(c.decaySecs),
     holderSellBps: c.holderSellBps,
@@ -94,7 +108,7 @@ export function toCurveView(address: PublicKey, c: any): CurveView {
 
 // 8 byte discriminator + Curve::INIT_SPACE from the program. Update when the Curve struct changes;
 // tokens made with an older layout have a different size and are skipped.
-const CURVE_ACCOUNT_SIZE = 362;
+const CURVE_ACCOUNT_SIZE = 372;
 
 export async function listCurves(program: anchor.Program<any>): Promise<CurveView[]> {
   if (!(program.account as any).curve) {

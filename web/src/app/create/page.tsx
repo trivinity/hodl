@@ -8,6 +8,7 @@ import TaxMelt from "@/components/TaxMelt";
 import { walletProgram } from "@/lib/program";
 import { duration } from "@/lib/format";
 import { friendlyError } from "@/lib/errors";
+import { useConfig } from "@/lib/useConfig";
 
 const PRESETS = {
   gentle: { label: "Gentle", maxTax: 15, decayH: 24, limit: 75, windowH: 24, reward: 25 },
@@ -20,6 +21,8 @@ export default function Create() {
   const router = useRouter();
   const { connection } = useConnection();
   const wallet = useAnchorWallet();
+  const config = useConfig();
+  const platformFeePct = (config?.platformFeeBps ?? 0) / 100;
 
   const [name, setName] = useState("");
   const [symbol, setSymbol] = useState("");
@@ -198,9 +201,10 @@ export default function Create() {
           </ul>
         )}
 
-        <button className="btn btn-primary btn-block" disabled={!wallet || busy || problems.length > 0} onClick={launch}>
+        <button className="btn btn-primary btn-block" disabled={!wallet || busy || problems.length > 0 || Boolean(config?.paused)} onClick={launch}>
           {!wallet ? "Connect a wallet to launch" : busy ? "Launching…" : "Launch token"}
         </button>
+        {config?.paused && <p className="notice notice-bad">New tokens are paused right now. Try again later.</p>}
         {status && <p className="notice">{status}</p>}
         {error && <p className="notice notice-bad">{error}</p>}
       </div>
@@ -214,7 +218,7 @@ export default function Create() {
         />
         <p className="side-note">
           Each wallet can sell {limit}% of its tokens per {duration(windowH * 3600)}. {reward}% of every sell tax is paid out to holders and the rest stays in the pool, lifting the
-          price for everyone still holding. {creatorFeePct > 0 ? `You earn ${creatorFeePct}% of every trade.` : "You earn no trade fee."}{holderFeePct > 0 ? ` Holders earn ${holderFeePct}% of every trade.` : ""}
+          price for everyone still holding. {platformFeePct > 0 ? `HODL takes a ${platformFeePct}% platform fee on every trade of your token, locked in when you launch. ` : ""}{creatorFeePct > 0 ? `You earn ${creatorFeePct}% of every trade.` : "You earn no trade fee."}{holderFeePct > 0 ? ` Holders earn ${holderFeePct}% of every trade.` : ""}
         </p>
       </aside>
     </div>

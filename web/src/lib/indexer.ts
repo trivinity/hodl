@@ -12,6 +12,7 @@ export type CurveRow = {
   uri: string;
   fee_bps: number;
   holder_fee_bps: number;
+  platform_fee_bps: number;
   max_tax_bps: number;
   decay_secs: number;
   holder_sell_bps: number;
@@ -31,6 +32,7 @@ export type TradeRow = {
   tax: number;
   rewards: number;
   fee_to_holders: number;
+  fee_to_platform: number;
   virtual_sol: number;
   virtual_tokens: number;
   ts: string;
@@ -75,6 +77,7 @@ export function eventsToRows(sig: string, slot: number, blockTime: number | null
         uri: d.uri,
         fee_bps: d.feeBps,
         holder_fee_bps: d.holderFeeBps,
+        platform_fee_bps: d.platformFeeBps,
         max_tax_bps: d.maxTaxBps,
         decay_secs: num(d.decaySecs),
         holder_sell_bps: d.holderSellBps,
@@ -95,6 +98,7 @@ export function eventsToRows(sig: string, slot: number, blockTime: number | null
         tax: num(d.tax),
         rewards: num(d.rewards),
         fee_to_holders: num(d.feeToHolders),
+        fee_to_platform: num(d.feeToPlatform),
         virtual_sol: num(d.virtualSol),
         virtual_tokens: num(d.virtualTokens),
         ts: iso(num(d.ts)),
