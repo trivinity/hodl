@@ -19,7 +19,8 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
 - [x] Calm minimal restyle (Inter + Geist Mono, dark mode)
 - [x] Security headers, https-only token images
 - [x] Wallet splitting is not a loophole: limit is a % of each wallet's balance, and tokens moved to a fresh wallet pay the full starting tax (both covered by tests)
-- [x] Tests: 16 on-chain (yarn test), 18 math (cargo test)
+- [x] Moved tokens stop earning, covered by a test
+- [x] Tests: 17 on-chain (yarn test), 18 math (cargo test)
 
 ## Open: security and correctness
 - [ ] LOW  Reward flash-hold: tokens moved out and back by plain transfer still earn while away.
@@ -33,6 +34,8 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
 - [ ] LOW  npm audit: 22 findings inside Solana/Anchor libraries, no safe fix yet. Re-check on upgrades
 - [ ] LOW  CURVE_ACCOUNT_SIZE in web/src/lib/program.ts is hardcoded. Update if the Curve struct changes
 - [ ] HIGH (before mainnet) Professional audit, legal review, multisig upgrade authority
+
+- [ ] UX  A wallet that moves all its tokens away forfeits rewards it had not claimed yet. Site must warn: claim before moving tokens
 
 ## Open: product
 - [ ] Richer home page: totals strip, token cards with sparkline, activity ticker

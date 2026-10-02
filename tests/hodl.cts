@@ -430,4 +430,60 @@ describe("HODL", () => {
       assert.isTrue((s3 + s4) * 2n <= total && (s3 + s4) * 2n >= total - 2n, "split wallets sold more than half in total");
     });
   });
+
+  describe("moving tokens away", () => {
+    const m = Keypair.generate();
+    const h1 = Keypair.generate(); // buys, then moves everything to a cold wallet
+    const h2 = Keypair.generate(); // keeps holding
+    const cold = Keypair.generate();
+    const x = Keypair.generate(); // sells early and pays the tax
+    const ataOf = (w: any) => getAssociatedTokenAddressSync(m.publicKey, w.publicKey);
+    const balOf = async (w: any) => big((await getAccount(provider.connection, ataOf(w))).amount);
+    const buyM = (w: any, sol: number) =>
+      program.methods.buy(new BN(sol * LAMPORTS_PER_SOL), new BN(0)).accountsPartial({ buyer: w.publicKey, mint: m.publicKey }).signers([w]).rpc();
+    const claimM = (w: any) =>
+      program.methods.claimRewards().accountsPartial({ claimer: w.publicKey, mint: m.publicKey }).signers([w]).rpc();
+
+    it("a wallet that moved all its tokens away earns nothing more, and the holder who stayed does", async () => {
+      const fund = new Transaction();
+      for (const w of [h1, h2, x]) {
+        fund.add(SystemProgram.transfer({ fromPubkey: walletA.publicKey, toPubkey: w.publicKey, lamports: 3 * LAMPORTS_PER_SOL }));
+      }
+      await provider.sendAndConfirm(fund);
+      await program.methods
+        .createCurve("Moved", "MOVE", "", 100, 3000, new BN(3600), 5000, new BN(3600), 5000, 0)
+        .accountsPartial({ creator: walletA.publicKey, mint: m.publicKey })
+        .signers([m])
+        .rpc();
+
+      await buyM(h1, 1);
+      await buyM(h2, 1);
+      await buyM(x, 2);
+
+      // h1 sends every token to a cold wallet with a plain token transfer
+      const all = await balOf(h1);
+      await provider.sendAndConfirm(
+        new Transaction().add(
+          createAssociatedTokenAccountIdempotentInstruction(h1.publicKey, ataOf(cold), cold.publicKey, m.publicKey),
+          createTransferInstruction(ataOf(h1), ataOf(cold), h1.publicKey, all)
+        ),
+        [h1]
+      );
+      assert.equal(await balOf(h1), 0n);
+
+      // someone sells early, so half of the tax goes to holders
+      const xBal = await balOf(x);
+      await program.methods
+        .sell(new BN(((xBal * 40n) / 100n).toString()), new BN(0))
+        .accountsPartial({ seller: x.publicKey, mint: m.publicKey })
+        .signers([x])
+        .rpc();
+
+      // h1 holds nothing now: nothing to claim. h2 stayed: gets paid.
+      await expectError(claimM(h1), /NothingToClaim|No fees to claim/i);
+      const before = await lamports(h2.publicKey);
+      await claimM(h2);
+      assert.isTrue((await lamports(h2.publicKey)) > before, "the holder who stayed should have been paid");
+    });
+  });
 });
