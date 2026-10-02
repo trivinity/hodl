@@ -37,7 +37,7 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
 - [x] Tests: 26 on-chain (yarn test), 19 math (cargo test)
 
 ## Open: security and correctness
-- [ ] LOW  Reward flash-hold: tokens moved out and back by plain transfer still earn while away.
+- [x] CLOSED by the hook (tokens cannot be moved off the curve now): Reward flash-hold: tokens moved out and back by plain transfer still earn while away.
       Low today because the only market is our curve, which re-checks balances on every trade.
       FINDING (checked on the DEX docs): a Token-2022 transfer hook does NOT fix this where it matters.
         Meteora DAMM v2 revokes the hook at graduation. Orca needs a manual Token Badge. Raydium unconfirmed.
