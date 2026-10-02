@@ -12,7 +12,7 @@ import { friendlyError } from "@/lib/errors";
 const PRESETS = {
   gentle: { label: "Gentle", maxTax: 15, decayH: 24, limit: 75, windowH: 24, reward: 25 },
   standard: { label: "Standard", maxTax: 30, decayH: 168, limit: 50, windowH: 24, reward: 50 },
-  strict: { label: "Strict", maxTax: 45, decayH: 336, limit: 25, windowH: 24, reward: 75 },
+  strict: { label: "Strict", maxTax: 40, decayH: 240, limit: 35, windowH: 24, reward: 75 },
 } as const;
 type PresetKey = keyof typeof PRESETS;
 
