@@ -19,6 +19,9 @@ pub const METADATA_SEED: &[u8] = b"metadata";
 pub const CURVE_SEED: &[u8] = b"curve";
 pub const POSITION_SEED: &[u8] = b"position";
 pub const MAX_FEE_BPS: u16 = 500;
+/// The platform fee for new tokens can never be set above 2%.
+pub const MAX_PLATFORM_FEE_BPS: u16 = 200;
+pub const CONFIG_SEED: &[u8] = b"config";
 pub const MAX_TAX_BPS: u16 = 5_000; // 50% hard ceiling on the early-sell tax
 pub const MIN_WINDOW_SECS: i64 = 60;
 pub const MIN_DECAY_SECS: i64 = 60;
@@ -67,6 +70,7 @@ pub mod hold_launchpad {
             LaunchError::BadParams
         );
         require!(reward_bps <= 10_000, LaunchError::BadParams);
+        require!(!ctx.accounts.config.paused, LaunchError::Paused);
 
         // built before the strings move into the curve account
         let metadata_ix_data = encode_create_metadata_v3(&name, &symbol, &uri);
@@ -87,6 +91,9 @@ pub mod hold_launchpad {
         curve.accrued_fees = 0;
         curve.fee_bps = fee_bps;
         curve.holder_fee_bps = holder_fee_bps;
+        // the platform fee is locked in for this token at launch; later changes only affect new tokens
+        curve.platform_fee_bps = ctx.accounts.config.platform_fee_bps;
+        curve.accrued_platform_fees = 0;
         curve.max_tax_bps = max_tax_bps;
         curve.decay_secs = decay_secs;
         curve.holder_sell_bps = holder_sell_bps;
@@ -165,6 +172,7 @@ pub mod hold_launchpad {
             uri: c.uri.clone(),
             fee_bps: c.fee_bps,
             holder_fee_bps: c.holder_fee_bps,
+            platform_fee_bps: c.platform_fee_bps,
             max_tax_bps: c.max_tax_bps,
             decay_secs: c.decay_secs,
             holder_sell_bps: c.holder_sell_bps,
@@ -177,6 +185,7 @@ pub mod hold_launchpad {
 
     pub fn buy(ctx: Context<Buy>, sol_in: u64, min_tokens_out: u64) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
+        require!(!ctx.accounts.config.paused, LaunchError::Paused);
         let curve = &ctx.accounts.curve;
         require!(!curve.complete, LaunchError::CurveComplete);
 
@@ -185,11 +194,15 @@ pub mod hold_launchpad {
             curve.virtual_tokens,
             curve.real_tokens,
             sol_in,
-            curve.fee_bps + curve.holder_fee_bps,
+            curve.fee_bps + curve.holder_fee_bps + curve.platform_fee_bps,
         )
         .ok_or(LaunchError::MathError)?;
         require!(q.tokens_out >= min_tokens_out, LaunchError::Slippage);
-        let holder_fee_target = holder_fee_part(q.fee, curve.fee_bps, curve.holder_fee_bps).ok_or(LaunchError::MathError)?;
+        // split the fee three ways: platform, then the rest between holders and the creator
+        let platform_fee = platform_fee_part(q.fee, curve.fee_bps + curve.holder_fee_bps + curve.platform_fee_bps, curve.platform_fee_bps)
+            .ok_or(LaunchError::MathError)?;
+        let fee_rest = q.fee - platform_fee;
+        let holder_fee_target = holder_fee_part(fee_rest, curve.fee_bps, curve.holder_fee_bps).ok_or(LaunchError::MathError)?;
 
         // hold clock: only tokens bought through the curve carry age
         let bal_before = ctx.accounts.buyer_ata.amount;
@@ -251,7 +264,8 @@ pub mod hold_launchpad {
         curve.real_sol = curve.real_sol.checked_add(q.net).ok_or(LaunchError::MathError)?;
         curve.real_tokens = curve.real_tokens.checked_sub(q.tokens_out).ok_or(LaunchError::MathError)?;
         // creator gets the creator part of the fee, plus any holder part nobody could be paid
-        curve.accrued_fees = curve.accrued_fees.checked_add(q.fee - fee_distributed).ok_or(LaunchError::MathError)?;
+        curve.accrued_fees = curve.accrued_fees.checked_add(fee_rest - fee_distributed).ok_or(LaunchError::MathError)?;
+        curve.accrued_platform_fees = curve.accrued_platform_fees.checked_add(platform_fee).ok_or(LaunchError::MathError)?;
         curve.reward_pool = curve.reward_pool.checked_add(fee_distributed).ok_or(LaunchError::MathError)?;
         curve.acc_per_token = acc_after;
         curve.total_tracked = total_tracked_after;
@@ -268,6 +282,7 @@ pub mod hold_launchpad {
             tax: 0,
             rewards: 0,
             fee_to_holders: fee_distributed,
+            fee_to_platform: platform_fee,
             virtual_sol: curve.virtual_sol,
             virtual_tokens: curve.virtual_tokens,
             ts: now,
@@ -283,7 +298,7 @@ pub mod hold_launchpad {
         let balance = ctx.accounts.seller_ata.amount;
         require!(tokens_in > 0 && tokens_in <= balance, LaunchError::MathError);
 
-        let q = sell_quote(curve.virtual_sol, curve.virtual_tokens, tokens_in, curve.fee_bps + curve.holder_fee_bps)
+        let q = sell_quote(curve.virtual_sol, curve.virtual_tokens, tokens_in, curve.fee_bps + curve.holder_fee_bps + curve.platform_fee_bps)
             .ok_or(LaunchError::MathError)?;
         require!(q.gross <= curve.real_sol, LaunchError::MathError);
 
@@ -330,7 +345,10 @@ pub mod hold_launchpad {
         let others = curve.total_tracked.checked_sub(old_tracked).ok_or(LaunchError::MathError)?;
         let total_tracked_after = others.checked_add(new_tracked).ok_or(LaunchError::MathError)?;
         let reward_target = reward_share(tax, curve.reward_bps).ok_or(LaunchError::MathError)?;
-        let holder_fee_target = holder_fee_part(q.fee, curve.fee_bps, curve.holder_fee_bps).ok_or(LaunchError::MathError)?;
+        let platform_fee = platform_fee_part(q.fee, curve.fee_bps + curve.holder_fee_bps + curve.platform_fee_bps, curve.platform_fee_bps)
+            .ok_or(LaunchError::MathError)?;
+        let fee_rest = q.fee - platform_fee;
+        let holder_fee_target = holder_fee_part(fee_rest, curve.fee_bps, curve.holder_fee_bps).ok_or(LaunchError::MathError)?;
         let (acc_inc, distributed) = acc_increase(reward_target, others).ok_or(LaunchError::MathError)?;
         let (fee_inc, fee_distributed) = acc_increase(holder_fee_target, others).ok_or(LaunchError::MathError)?;
         let acc_after = acc_before
@@ -378,7 +396,8 @@ pub mod hold_launchpad {
         curve.virtual_tokens = curve.virtual_tokens.checked_add(tokens_in).ok_or(LaunchError::MathError)?;
         curve.real_sol = curve.real_sol.checked_sub(leaves).ok_or(LaunchError::MathError)?;
         curve.real_tokens = curve.real_tokens.checked_add(tokens_in).ok_or(LaunchError::MathError)?;
-        curve.accrued_fees = curve.accrued_fees.checked_add(q.fee - fee_distributed).ok_or(LaunchError::MathError)?;
+        curve.accrued_fees = curve.accrued_fees.checked_add(fee_rest - fee_distributed).ok_or(LaunchError::MathError)?;
+        curve.accrued_platform_fees = curve.accrued_platform_fees.checked_add(platform_fee).ok_or(LaunchError::MathError)?;
 
         emit!(Trade {
             mint: ctx.accounts.mint.key(),
@@ -389,6 +408,7 @@ pub mod hold_launchpad {
             tax,
             rewards: distributed,
             fee_to_holders: fee_distributed,
+            fee_to_platform: platform_fee,
             virtual_sol: curve.virtual_sol,
             virtual_tokens: curve.virtual_tokens,
             ts: now,
@@ -438,6 +458,65 @@ pub mod hold_launchpad {
         Ok(())
     }
 
+    /// One-time setup, only by the program's upgrade authority. The admin starts as that authority and can hand over to a multisig.
+    pub fn init_config(ctx: Context<InitConfig>, treasury: Pubkey, platform_fee_bps: u16) -> Result<()> {
+        require!(platform_fee_bps <= MAX_PLATFORM_FEE_BPS, LaunchError::BadParams);
+        let c = &mut ctx.accounts.config;
+        c.admin = ctx.accounts.authority.key();
+        c.pending_admin = Pubkey::default();
+        c.treasury = treasury;
+        c.platform_fee_bps = platform_fee_bps;
+        c.paused = false;
+        c.bump = ctx.bumps.config;
+        Ok(())
+    }
+
+    /// Emergency stop for NEW BUYS and NEW TOKENS only. Selling and claiming rewards always keep working.
+    pub fn set_paused(ctx: Context<AdminOnly>, paused: bool) -> Result<()> {
+        ctx.accounts.config.paused = paused;
+        emit!(PauseChanged { paused });
+        Ok(())
+    }
+
+    /// Platform fee for tokens launched from now on. Existing tokens keep the fee they launched with.
+    pub fn set_platform_fee(ctx: Context<AdminOnly>, platform_fee_bps: u16) -> Result<()> {
+        require!(platform_fee_bps <= MAX_PLATFORM_FEE_BPS, LaunchError::BadParams);
+        ctx.accounts.config.platform_fee_bps = platform_fee_bps;
+        Ok(())
+    }
+
+    pub fn set_treasury(ctx: Context<AdminOnly>, treasury: Pubkey) -> Result<()> {
+        ctx.accounts.config.treasury = treasury;
+        Ok(())
+    }
+
+    /// Step 1 of handing admin to someone else (for example a multisig).
+    pub fn propose_admin(ctx: Context<AdminOnly>, new_admin: Pubkey) -> Result<()> {
+        ctx.accounts.config.pending_admin = new_admin;
+        Ok(())
+    }
+
+    /// Step 2: the proposed admin signs to accept, which proves the address is real and usable.
+    pub fn accept_admin(ctx: Context<AcceptAdmin>) -> Result<()> {
+        let c = &mut ctx.accounts.config;
+        require!(c.pending_admin != Pubkey::default() && c.pending_admin == ctx.accounts.new_admin.key(), LaunchError::NotPendingAdmin);
+        c.admin = c.pending_admin;
+        c.pending_admin = Pubkey::default();
+        Ok(())
+    }
+
+    /// Anyone can trigger this. The money can only go to the treasury address in the config.
+    pub fn claim_platform_fees(ctx: Context<ClaimPlatformFees>) -> Result<()> {
+        let amount = ctx.accounts.curve.accrued_platform_fees;
+        require!(amount > 0, LaunchError::NothingToClaim);
+        let curve_info = ctx.accounts.curve.to_account_info();
+        let treasury_info = ctx.accounts.treasury.to_account_info();
+        **curve_info.try_borrow_mut_lamports()? = curve_info.lamports().checked_sub(amount).ok_or(LaunchError::MathError)?;
+        **treasury_info.try_borrow_mut_lamports()? = treasury_info.lamports().checked_add(amount).ok_or(LaunchError::MathError)?;
+        ctx.accounts.curve.accrued_platform_fees = 0;
+        Ok(())
+    }
+
     pub fn claim_fees(ctx: Context<ClaimFees>) -> Result<()> {
         let amount = ctx.accounts.curve.accrued_fees;
         require!(amount > 0, LaunchError::NothingToClaim);
@@ -479,6 +558,21 @@ pub fn encode_create_metadata_v3(name: &str, symbol: &str, uri: &str) -> Vec<u8>
 
 #[account]
 #[derive(InitSpace)]
+pub struct Config {
+    /// can pause, change the fee for new tokens, and hand over admin. Meant to be a multisig.
+    pub admin: Pubkey,
+    pub pending_admin: Pubkey,
+    /// where claim_platform_fees sends the money
+    pub treasury: Pubkey,
+    /// platform fee given to tokens launched from now on
+    pub platform_fee_bps: u16,
+    /// true = no new buys and no new tokens. Sells and reward claims are never blocked.
+    pub paused: bool,
+    pub bump: u8,
+}
+
+#[account]
+#[derive(InitSpace)]
 pub struct Curve {
     pub creator: Pubkey,
     pub mint: Pubkey,
@@ -493,9 +587,13 @@ pub struct Curve {
     pub real_sol: u64,
     pub real_tokens: u64,
     pub accrued_fees: u64,
+    /// platform fees waiting to be sent to the treasury
+    pub accrued_platform_fees: u64,
     pub fee_bps: u16,
     /// extra trade fee, paid to holders instead of the creator
     pub holder_fee_bps: u16,
+    /// platform fee locked in when this token launched
+    pub platform_fee_bps: u16,
     pub max_tax_bps: u16,
     pub decay_secs: i64,
     pub holder_sell_bps: u16,
@@ -547,6 +645,8 @@ pub struct Trade {
     pub rewards: u64,
     /// part of the trade fee paid out to holders
     pub fee_to_holders: u64,
+    /// part of the trade fee that goes to the platform
+    pub fee_to_platform: u64,
     pub virtual_sol: u64,
     pub virtual_tokens: u64,
     pub ts: i64,
@@ -577,6 +677,9 @@ pub struct CreateCurve<'info> {
     )]
     pub vault: Account<'info, TokenAccount>,
 
+    #[account(seeds = [CONFIG_SEED], bump = config.bump)]
+    pub config: Account<'info, Config>,
+
     /// CHECK: the Metaplex metadata PDA for this mint, created by the CPI in create_curve
     #[account(
         mut,
@@ -599,6 +702,9 @@ pub struct CreateCurve<'info> {
 pub struct Buy<'info> {
     #[account(mut)]
     pub buyer: Signer<'info>,
+
+    #[account(seeds = [CONFIG_SEED], bump = config.bump)]
+    pub config: Account<'info, Config>,
 
     #[account(mut, seeds = [CURVE_SEED, mint.key().as_ref()], bump = curve.bump, has_one = mint)]
     pub curve: Account<'info, Curve>,
@@ -668,12 +774,18 @@ pub struct CurveCreated {
     pub uri: String,
     pub fee_bps: u16,
     pub holder_fee_bps: u16,
+    pub platform_fee_bps: u16,
     pub max_tax_bps: u16,
     pub decay_secs: i64,
     pub holder_sell_bps: u16,
     pub window_secs: i64,
     pub reward_bps: u16,
     pub ts: i64,
+}
+
+#[event]
+pub struct PauseChanged {
+    pub paused: bool,
 }
 
 #[event]
@@ -705,6 +817,56 @@ pub struct ClaimRewards<'info> {
 }
 
 #[derive(Accounts)]
+pub struct InitConfig<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+
+    #[account(init, payer = authority, space = 8 + Config::INIT_SPACE, seeds = [CONFIG_SEED], bump)]
+    pub config: Account<'info, Config>,
+
+    pub program: Program<'info, crate::program::HoldLaunchpad>,
+
+    // only whoever controls upgrades of this program may set it up, so nobody can front-run the first call
+    #[account(
+        constraint = program.programdata_address()? == Some(program_data.key()) @ LaunchError::Unauthorized,
+        constraint = program_data.upgrade_authority_address == Some(authority.key()) @ LaunchError::Unauthorized
+    )]
+    pub program_data: Account<'info, ProgramData>,
+
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct AdminOnly<'info> {
+    #[account(address = config.admin @ LaunchError::Unauthorized)]
+    pub admin: Signer<'info>,
+
+    #[account(mut, seeds = [CONFIG_SEED], bump = config.bump)]
+    pub config: Account<'info, Config>,
+}
+
+#[derive(Accounts)]
+pub struct AcceptAdmin<'info> {
+    pub new_admin: Signer<'info>,
+
+    #[account(mut, seeds = [CONFIG_SEED], bump = config.bump)]
+    pub config: Account<'info, Config>,
+}
+
+#[derive(Accounts)]
+pub struct ClaimPlatformFees<'info> {
+    #[account(mut)]
+    pub curve: Account<'info, Curve>,
+
+    #[account(seeds = [CONFIG_SEED], bump = config.bump)]
+    pub config: Account<'info, Config>,
+
+    /// CHECK: must be exactly the treasury address stored in the config
+    #[account(mut, address = config.treasury)]
+    pub treasury: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
 pub struct ClaimFees<'info> {
     #[account(mut)]
     pub creator: Signer<'info>,
@@ -727,4 +889,10 @@ pub enum LaunchError {
     HolderLimitExceeded,
     #[msg("No fees to claim")]
     NothingToClaim,
+    #[msg("Trading is paused: no new buys or new tokens right now. Selling still works.")]
+    Paused,
+    #[msg("Not allowed")]
+    Unauthorized,
+    #[msg("You are not the proposed admin")]
+    NotPendingAdmin,
 }

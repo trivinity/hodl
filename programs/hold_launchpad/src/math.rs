@@ -176,6 +176,14 @@ pub fn holder_fee_part(fee: u64, creator_bps: u16, holder_bps: u16) -> Option<u6
     u64::try_from(mul_div_floor(fee as u128, holder_bps as u128, total)?).ok()
 }
 
+/// Platform part of a trade fee: fee * platform_bps / total_bps.
+pub fn platform_fee_part(fee: u64, total_bps: u16, platform_bps: u16) -> Option<u64> {
+    if total_bps == 0 {
+        return Some(0);
+    }
+    u64::try_from(mul_div_floor(fee as u128, platform_bps as u128, total_bps as u128)?).ok()
+}
+
 /// Fixed-point scale for the per-token reward accumulator.
 pub const ACC_SCALE: u128 = 1_000_000_000_000;
 /// Below this much tracked supply (1 token) rewards are not distributed, so the accumulator can never blow up.
@@ -366,5 +374,19 @@ mod tests {
         assert_eq!(holder_fee_part(200, 0, 100), Some(200));
         assert_eq!(holder_fee_part(200, 0, 0), Some(0));
         assert_eq!(holder_fee_part(3, 100, 100), Some(1));
+    }
+
+    #[test]
+    fn platform_part_is_a_share_of_the_fee() {
+        assert_eq!(platform_fee_part(300, 300, 100), Some(100));
+        assert_eq!(platform_fee_part(300, 300, 0), Some(0));
+        assert_eq!(platform_fee_part(300, 0, 0), Some(0));
+        assert_eq!(platform_fee_part(1, 300, 100), Some(0));
+        // the three parts always add back up to the fee
+        let fee = 1_234_567u64;
+        let plat = platform_fee_part(fee, 300, 100).unwrap();
+        let rest = fee - plat;
+        let holders = holder_fee_part(rest, 100, 100).unwrap();
+        assert_eq!(plat + (rest - holders) + holders, fee);
     }
 }

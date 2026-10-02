@@ -8,6 +8,48 @@
   },
   "instructions": [
     {
+      "name": "accept_admin",
+      "docs": [
+        "Step 2: the proposed admin signs to accept, which proves the address is real and usable."
+      ],
+      "discriminator": [
+        112,
+        42,
+        45,
+        90,
+        116,
+        181,
+        13,
+        170
+      ],
+      "accounts": [
+        {
+          "name": "new_admin",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "buy",
       "discriminator": [
         102,
@@ -24,6 +66,24 @@
           "name": "buyer",
           "writable": true,
           "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
         },
         {
           "name": "curve",
@@ -309,6 +369,51 @@
         },
         {
           "name": "curve",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "claim_platform_fees",
+      "docs": [
+        "Anyone can trigger this. The money can only go to the treasury address in the config."
+      ],
+      "discriminator": [
+        159,
+        129,
+        37,
+        35,
+        170,
+        99,
+        163,
+        16
+      ],
+      "accounts": [
+        {
+          "name": "curve",
+          "writable": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "treasury",
           "writable": true
         }
       ],
@@ -630,6 +735,24 @@
           }
         },
         {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
           "name": "metadata",
           "writable": true,
           "pda": {
@@ -785,6 +908,116 @@
         {
           "name": "holder_fee_bps",
           "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "init_config",
+      "docs": [
+        "One-time setup, only by the program's upgrade authority. The admin starts as that authority and can hand over to a multisig."
+      ],
+      "discriminator": [
+        23,
+        235,
+        115,
+        232,
+        168,
+        96,
+        1,
+        231
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program",
+          "address": "Eyv8eYAjHonsHQ6awmB4fy1mv2jqXciK8PzooUoV5kmb"
+        },
+        {
+          "name": "program_data"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "treasury",
+          "type": "pubkey"
+        },
+        {
+          "name": "platform_fee_bps",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "propose_admin",
+      "docs": [
+        "Step 1 of handing admin to someone else (for example a multisig)."
+      ],
+      "discriminator": [
+        121,
+        214,
+        199,
+        212,
+        87,
+        39,
+        117,
+        234
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "new_admin",
+          "type": "pubkey"
         }
       ]
     },
@@ -1062,9 +1295,160 @@
           "type": "u64"
         }
       ]
+    },
+    {
+      "name": "set_paused",
+      "docs": [
+        "Emergency stop for NEW BUYS and NEW TOKENS only. Selling and claiming rewards always keep working."
+      ],
+      "discriminator": [
+        91,
+        60,
+        125,
+        192,
+        176,
+        225,
+        166,
+        218
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "paused",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "set_platform_fee",
+      "docs": [
+        "Platform fee for tokens launched from now on. Existing tokens keep the fee they launched with."
+      ],
+      "discriminator": [
+        19,
+        70,
+        111,
+        182,
+        156,
+        58,
+        208,
+        203
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "platform_fee_bps",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "set_treasury",
+      "discriminator": [
+        57,
+        97,
+        196,
+        95,
+        195,
+        206,
+        106,
+        136
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "treasury",
+          "type": "pubkey"
+        }
+      ]
     }
   ],
   "accounts": [
+    {
+      "name": "Config",
+      "discriminator": [
+        155,
+        12,
+        170,
+        224,
+        30,
+        250,
+        204,
+        130
+      ]
+    },
     {
       "name": "Curve",
       "discriminator": [
@@ -1104,6 +1488,19 @@
         100,
         171,
         230
+      ]
+    },
+    {
+      "name": "PauseChanged",
+      "discriminator": [
+        238,
+        188,
+        213,
+        78,
+        134,
+        209,
+        178,
+        218
       ]
     },
     {
@@ -1163,9 +1560,68 @@
       "code": 6005,
       "name": "NothingToClaim",
       "msg": "No fees to claim"
+    },
+    {
+      "code": 6006,
+      "name": "Paused",
+      "msg": "Trading is paused: no new buys or new tokens right now. Selling still works."
+    },
+    {
+      "code": 6007,
+      "name": "Unauthorized",
+      "msg": "Not allowed"
+    },
+    {
+      "code": 6008,
+      "name": "NotPendingAdmin",
+      "msg": "You are not the proposed admin"
     }
   ],
   "types": [
+    {
+      "name": "Config",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admin",
+            "docs": [
+              "can pause, change the fee for new tokens, and hand over admin. Meant to be a multisig."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "pending_admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "treasury",
+            "docs": [
+              "where claim_platform_fees sends the money"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "platform_fee_bps",
+            "docs": [
+              "platform fee given to tokens launched from now on"
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "paused",
+            "docs": [
+              "true = no new buys and no new tokens. Sells and reward claims are never blocked."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
     {
       "name": "Curve",
       "type": {
@@ -1212,6 +1668,13 @@
             "type": "u64"
           },
           {
+            "name": "accrued_platform_fees",
+            "docs": [
+              "platform fees waiting to be sent to the treasury"
+            ],
+            "type": "u64"
+          },
+          {
             "name": "fee_bps",
             "type": "u16"
           },
@@ -1219,6 +1682,13 @@
             "name": "holder_fee_bps",
             "docs": [
               "extra trade fee, paid to holders instead of the creator"
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "platform_fee_bps",
+            "docs": [
+              "platform fee locked in when this token launched"
             ],
             "type": "u16"
           },
@@ -1315,6 +1785,10 @@
             "type": "u16"
           },
           {
+            "name": "platform_fee_bps",
+            "type": "u16"
+          },
+          {
             "name": "max_tax_bps",
             "type": "u16"
           },
@@ -1337,6 +1811,18 @@
           {
             "name": "ts",
             "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PauseChanged",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "paused",
+            "type": "bool"
           }
         ]
       }
@@ -1470,6 +1956,13 @@
             "name": "fee_to_holders",
             "docs": [
               "part of the trade fee paid out to holders"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "fee_to_platform",
+            "docs": [
+              "part of the trade fee that goes to the platform"
             ],
             "type": "u64"
           },

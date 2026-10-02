@@ -18,7 +18,8 @@ const idl = JSON.parse(
 
 const FEE_BPS = 100; // 1% trade fee to the creator
 const HOLDER_FEE_BPS = 100; // plus 1% trade fee to holders (2% total)
-const TOTAL_FEE_BPS = FEE_BPS + HOLDER_FEE_BPS;
+const PLATFORM_FEE_BPS = 100; // 1% platform fee, set when the config is created
+const TOTAL_FEE_BPS = FEE_BPS + HOLDER_FEE_BPS + PLATFORM_FEE_BPS;
 const MAX_TAX_BPS = 3000; // 30% sell tax at 0s held
 const DECAY_SECS = 3600; // fades to 0 over an hour
 const HOLDER_SELL_BPS = 5000; // one wallet can sell 50% of its balance per window
@@ -74,6 +75,14 @@ describe("HODL", () => {
       .signers(who.publicKey.equals(walletA.publicKey) ? [] : [who])
       .rpc();
 
+  const sellAndFetch = async (who: any, tokens: bigint) => {
+    const sig = await sell(who, tokens);
+    await provider.connection.confirmTransaction(sig, "confirmed");
+    const tx: any = await provider.connection.getTransaction(sig, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
+    const parser = new anchor.EventParser(program.programId, program.coder);
+    return [...parser.parseLogs(tx.meta.logMessages)].find((e: any) => e.name.toLowerCase() === "trade")!.data;
+  };
+
   const claim = (who: any) =>
     program.methods
       .claimRewards()
@@ -86,7 +95,7 @@ describe("HODL", () => {
     const c = await fetchCurve();
     const info = await provider.connection.getAccountInfo(curve, "confirmed");
     const rent = BigInt(await provider.connection.getMinimumBalanceForRentExemption(info!.data.length));
-    const owed = c.realSol + big(c.raw.accruedFees) + c.rewardPool + rent;
+    const owed = c.realSol + big(c.raw.accruedFees) + big(c.raw.accruedPlatformFees) + c.rewardPool + rent;
     assert.isTrue(BigInt(info!.lamports) >= owed, `insolvent: has ${info!.lamports}, owes ${owed}`);
   };
 
@@ -112,7 +121,29 @@ describe("HODL", () => {
     assert.fail("sell should have been blocked by the wallet limit");
   };
 
+  const [configPda] = PublicKey.findProgramAddressSync([Buffer.from("config")], program.programId);
+  const treasury = Keypair.generate();
+  // the account that holds the program's code and records who may upgrade it
+  const [programData] = PublicKey.findProgramAddressSync(
+    [program.programId.toBuffer()],
+    new PublicKey("BPFLoaderUpgradeab1e11111111111111111111111")
+  );
+  const fetchConfig = async () => (program.account as any).config.fetch(configPda);
+
   before(async () => {
+    // one-time program setup. Only the upgrade authority (the local wallet) may do it.
+    if (!(await (program.account as any).config.fetchNullable(configPda))) {
+      await program.methods
+        .initConfig(treasury.publicKey, PLATFORM_FEE_BPS)
+        .accountsPartial({ authority: walletA.publicKey, program: program.programId, programData })
+        .rpc();
+    }
+    const cfg: any = await fetchConfig();
+    assert.equal(cfg.platformFeeBps, PLATFORM_FEE_BPS, "tests expect a 1% platform fee");
+    // the treasury must be a real funded account, like a multisig vault, or tiny payouts would fail the rent check
+    await provider.sendAndConfirm(
+      new Transaction().add(SystemProgram.transfer({ fromPubkey: walletA.publicKey, toPubkey: cfg.treasury, lamports: LAMPORTS_PER_SOL / 100 }))
+    );
     const tx = new Transaction().add(
       SystemProgram.transfer({
         fromPubkey: walletA.publicKey,
@@ -285,7 +316,7 @@ describe("HODL", () => {
     await assertSolvent();
   });
 
-  it("trade fee is split between the creator and the other holders", async () => {
+  it("trade fee is split three ways: platform, holders and creator", async () => {
     const before = await fetchCurve();
     const sig = await buy(walletC, 1);
     await provider.connection.confirmTransaction(sig, "confirmed");
@@ -298,14 +329,35 @@ describe("HODL", () => {
     const after = await fetchCurve();
     const fee = big(ev.data.sol) - (after.realSol - before.realSol); // total fee = what was paid minus what entered the reserves
     const toHolders = big(ev.data.feeToHolders);
-    assert.isTrue(toHolders > 0n, "holders should get part of the fee");
-    const share = Number(toHolders) / Number(fee);
-    assert.isAbove(share, 0.499);
-    assert.isBelow(share, 0.501);
+    const toPlatform = big(ev.data.feeToPlatform);
+    assert.isTrue(toHolders > 0n && toPlatform > 0n, "holders and platform should both get a part");
+    // 1% platform, 1% holders, 1% creator out of 3% total: a third each
+    assert.isAbove(Number(toPlatform) / Number(fee), 0.333);
+    assert.isBelow(Number(toPlatform) / Number(fee), 0.334);
+    assert.isAbove(Number(toHolders) / Number(fee), 0.333);
+    assert.isBelow(Number(toHolders) / Number(fee), 0.334);
     assert.equal(
-      big(after.raw.accruedFees) - big(before.raw.accruedFees) + toHolders,
+      big(after.raw.accruedFees) - big(before.raw.accruedFees) + toHolders + toPlatform,
       fee,
-      "fee must be fully accounted for: creator part + holder part"
+      "fee must be fully accounted for: creator part + holder part + platform part"
+    );
+    assert.equal(big(after.raw.accruedPlatformFees) - big(before.raw.accruedPlatformFees), toPlatform);
+    await assertSolvent();
+  });
+
+  it("anyone can send platform fees to the treasury, and only to the treasury", async () => {
+    const cfg: any = await fetchConfig();
+    const owed = big((await fetchCurve()).raw.accruedPlatformFees);
+    assert.isTrue(owed > 0n);
+    const before = await lamports(cfg.treasury);
+    // the trigger needs no special permission: the provider wallet is just an ordinary payer here
+    await program.methods.claimPlatformFees().accountsPartial({ curve, treasury: cfg.treasury }).rpc();
+    assert.equal((await lamports(cfg.treasury)) - before, owed, "the treasury receives exactly what was owed");
+    assert.equal(big((await fetchCurve()).raw.accruedPlatformFees), 0n);
+    // sending it anywhere else is refused
+    await expectError(
+      program.methods.claimPlatformFees().accountsPartial({ curve, treasury: walletB.publicKey }).rpc(),
+      /ConstraintAddress|address/i
     );
     await assertSolvent();
   });
@@ -512,6 +564,113 @@ describe("HODL", () => {
       const before = await lamports(h2.publicKey);
       await claimM(h2);
       assert.isTrue((await lamports(h2.publicKey)) > before, "the holder who stayed should have been paid");
+    });
+  });
+
+  describe("admin controls", () => {
+    const stranger = Keypair.generate();
+    const newAdmin = Keypair.generate();
+    const createTok = (m: any) =>
+      program.methods
+        .createCurve("Paused", "PAUSE", "", 100, 3000, new BN(3600), 5000, new BN(3600), 5000, 0)
+        .accountsPartial({ creator: walletA.publicKey, mint: m.publicKey })
+        .signers([m])
+        .rpc();
+
+    before(async () => {
+      await provider.sendAndConfirm(
+        new Transaction().add(
+          SystemProgram.transfer({ fromPubkey: walletA.publicKey, toPubkey: stranger.publicKey, lamports: LAMPORTS_PER_SOL }),
+          SystemProgram.transfer({ fromPubkey: walletA.publicKey, toPubkey: newAdmin.publicKey, lamports: LAMPORTS_PER_SOL })
+        )
+      );
+    });
+
+    it("a stranger cannot pause, change the fee, or set the treasury", async () => {
+      await expectError(
+        program.methods.setPaused(true).accountsPartial({ admin: stranger.publicKey }).signers([stranger]).rpc(),
+        /Unauthorized|Not allowed|ConstraintAddress/i
+      );
+      await expectError(
+        program.methods.setPlatformFee(0).accountsPartial({ admin: stranger.publicKey }).signers([stranger]).rpc(),
+        /Unauthorized|Not allowed|ConstraintAddress/i
+      );
+      await expectError(
+        program.methods.setTreasury(stranger.publicKey).accountsPartial({ admin: stranger.publicKey }).signers([stranger]).rpc(),
+        /Unauthorized|Not allowed|ConstraintAddress/i
+      );
+      assert.isFalse((await fetchConfig()).paused);
+    });
+
+    it("pausing stops new buys and new tokens, but never selling or claiming", async () => {
+      // someone holds tokens on the main test token before the pause
+      const bal = await tokenBal(walletB.publicKey);
+      assert.isTrue(bal > 0n);
+      await program.methods.setPaused(true).accountsPartial({ admin: walletA.publicKey }).rpc();
+      try {
+        await expectError(buy(walletB, 1), /Paused|paused/i);
+        await expectError(createTok(Keypair.generate()), /Paused|paused/i);
+        // selling still works while paused (use a small piece, inside the daily limit)
+        const ev = (await sellAndFetch(walletB, bal / 100n)) as any;
+        assert.isTrue(big(ev.sol) > 0n, "sell must pay out while paused");
+        // claiming rewards still works while paused (or has nothing to claim, but is not blocked by the pause)
+        try {
+          await claim(walletB);
+        } catch (e: any) {
+          assert.match(String(e) + JSON.stringify(e?.logs ?? ""), /NothingToClaim|No fees to claim/i);
+        }
+      } finally {
+        await program.methods.setPaused(false).accountsPartial({ admin: walletA.publicKey }).rpc();
+      }
+      await buy(walletB, 0.01); // trading is back
+    });
+
+    it("a new token locks in the platform fee it launched with", async () => {
+      const m1 = Keypair.generate();
+      await createTok(m1);
+      const [c1] = PublicKey.findProgramAddressSync([Buffer.from("curve"), m1.publicKey.toBuffer()], program.programId);
+      assert.equal((await (program.account as any).curve.fetch(c1)).platformFeeBps, PLATFORM_FEE_BPS);
+
+      await program.methods.setPlatformFee(200).accountsPartial({ admin: walletA.publicKey }).rpc();
+      const m2 = Keypair.generate();
+      await createTok(m2);
+      const [c2] = PublicKey.findProgramAddressSync([Buffer.from("curve"), m2.publicKey.toBuffer()], program.programId);
+      assert.equal((await (program.account as any).curve.fetch(c2)).platformFeeBps, 200, "new token gets the new fee");
+      assert.equal((await (program.account as any).curve.fetch(c1)).platformFeeBps, PLATFORM_FEE_BPS, "old token keeps its fee");
+      // the fee can never go above 2%
+      await expectError(
+        program.methods.setPlatformFee(201).accountsPartial({ admin: walletA.publicKey }).rpc(),
+        /BadParams|Bad curve parameters/i
+      );
+      await program.methods.setPlatformFee(PLATFORM_FEE_BPS).accountsPartial({ admin: walletA.publicKey }).rpc();
+    });
+
+    it("admin hands over in two steps, and the wrong address cannot accept", async () => {
+      await program.methods.proposeAdmin(newAdmin.publicKey).accountsPartial({ admin: walletA.publicKey }).rpc();
+      // nothing changes until the proposed admin signs
+      assert.equal((await fetchConfig()).admin.toBase58(), walletA.publicKey.toBase58());
+      await expectError(
+        program.methods.acceptAdmin().accountsPartial({ newAdmin: stranger.publicKey }).signers([stranger]).rpc(),
+        /NotPendingAdmin|not the proposed admin/i
+      );
+      await program.methods.acceptAdmin().accountsPartial({ newAdmin: newAdmin.publicKey }).signers([newAdmin]).rpc();
+      assert.equal((await fetchConfig()).admin.toBase58(), newAdmin.publicKey.toBase58());
+      // the old admin lost its powers
+      await expectError(
+        program.methods.setPaused(true).accountsPartial({ admin: walletA.publicKey }).rpc(),
+        /Unauthorized|Not allowed|ConstraintAddress/i
+      );
+      // hand it back so other tests keep working
+      await program.methods.proposeAdmin(walletA.publicKey).accountsPartial({ admin: newAdmin.publicKey }).signers([newAdmin]).rpc();
+      await program.methods.acceptAdmin().accountsPartial({ newAdmin: walletA.publicKey }).rpc();
+      assert.equal((await fetchConfig()).admin.toBase58(), walletA.publicKey.toBase58());
+    });
+
+    it("setup can only be done once", async () => {
+      await expectError(
+        program.methods.initConfig(treasury.publicKey, 100).accountsPartial({ authority: walletA.publicKey, program: program.programId, programData }).rpc(),
+        /already in use|custom program error|0x0/i
+      );
     });
   });
 });
