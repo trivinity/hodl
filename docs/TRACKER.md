@@ -39,7 +39,10 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
 - [ ] "My earnings" page: everything you can claim across tokens
 - [ ] Holder-first discovery: sort by SOL paid to holders, share who kept holding
 - [ ] Devnet deploy + private Vercel preview (password protected)
-- [ ] DEX graduation (and Token-2022 + transfer hook at the same time)
+- [ ] DEX graduation. Idea (unverified, needs a second read of Meteora docs): graduate into a Meteora DAMM v2 pool with a
+      decaying fee scheduler, and a permanently locked LP position owned by our program whose fees are paid to holders.
+      Carries over: decaying fee (same for everyone), holder fee payouts, anti-snipe. Does NOT carry over: per-wallet hold-time tax and sell limits.
+      To check first: max starting fee, whether a program PDA can own and claim a locked position, how to split payouts without our curve.
 - [ ] Token metadata and images (on-chain)
 - [ ] Price chart
 
