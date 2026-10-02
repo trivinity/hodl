@@ -21,6 +21,8 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
 - [x] Wallet splitting is not a loophole: limit is a % of each wallet's balance, and tokens moved to a fresh wallet pay the full starting tax (both covered by tests)
 - [x] Moved tokens stop earning, covered by a test
 - [x] On-chain token metadata (Metaplex): name, symbol, image link; immutable; covered by a test
+- [x] Deployed to DEVNET (program Eyv8eYAjHonsHQ6awmB4fy1mv2jqXciK8PzooUoV5kmb, max-len 335000, upgrade authority = a devnet-only key kept outside the repo).
+      Smoke test passed on devnet: create with metadata, buy, taxed sell, reward claim (cost about 0.11 SOL). Test token A81cK8f3VzVsWewKZFmDoZaWuaqsm4KEB2bFfcaHKwCq
 - [x] Tests: 17 on-chain (yarn test), 18 math (cargo test)
 
 ## Open: security and correctness
@@ -42,7 +44,7 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
 - [ ] Richer home page: totals strip, token cards with sparkline, activity ticker
 - [ ] "My earnings" page: everything you can claim across tokens
 - [ ] Holder-first discovery: sort by SOL paid to holders, share who kept holding
-- [ ] Devnet deploy + private Vercel preview (password protected)
+- [ ] Private Vercel preview (password protected), pointed at devnet
 - [ ] DEX graduation. DIRECTION ADOPTED: tokens graduate into a Meteora DAMM v2 pool; the personal hold-time tax and
       sell limits apply on our curve only. What carries over: a decaying fee for everyone (fee scheduler, 99% max so our 30% start fits),
       fees paid to holders via a permanently locked LP position owned by our program, anti-snipe from the high starting fee.
@@ -54,6 +56,8 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
 - [ ] Price chart
 
 ## Notes
+- Devnet: set `NEXT_PUBLIC_RPC_URL=https://api.devnet.solana.com` and `NEXT_PUBLIC_CLUSTER_LABEL=devnet` (the public RPC is rate limited; use a free provider key for sharing).
+- Devnet SOL is scarce: the public faucet is rate limited. Do not run the full test suite on devnet (it needs about 20 SOL).
 - Local run: validator needs the Metaplex program copied from devnet: `solana-test-validator --reset --url devnet --clone-upgradeable-program metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s` (run it in a terminal tab), then `cd web && npm run dev`.
 - Never commit: `*-keypair.json`, `.env.local`, licensed fonts.
 - Tests: `ANCHOR_PROVIDER_URL=http://localhost:8899 ANCHOR_WALLET=~/.config/solana/id.json yarn test` and `cargo test`.
