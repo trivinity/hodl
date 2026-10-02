@@ -59,7 +59,7 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
 - [ ] Richer home page: totals strip, token cards with sparkline, activity ticker
 - [ ] "My earnings" page: everything you can claim across tokens
 - [ ] Holder-first discovery: sort by SOL paid to holders, share who kept holding
-- [ ] Private Vercel preview (password protected), pointed at devnet
+- [ ] Private Vercel preview on devnet: the connector got 403 creating the project, so follow docs/VERCEL.md by hand (site builds cleanly with the devnet settings; verified)
 - [ ] DEX graduation. DIRECTION ADOPTED: tokens graduate into a Meteora DAMM v2 pool; the personal hold-time tax and
       sell limits apply on our curve only. What carries over: a decaying fee for everyone (fee scheduler, 99% max so our 30% start fits),
       fees paid to holders via a permanently locked LP position owned by our program, anti-snipe from the high starting fee.
