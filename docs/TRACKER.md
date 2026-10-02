@@ -60,7 +60,8 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
 
 - [x] Supabase project "hodl" created (free tier, us-east-1, ref puamkthzhgibhzfjrktl) and the schema applied. Security advisor: clean (one INFO about indexer_state having no policies, which is intended).
       Verified with the public key: reads work, inserts refused, deletes change nothing, indexer_state hidden. Public URL + anon key are in web/.env.local.
-- [ ] Supabase: STILL UNVERIFIED the server writes (supabaseStore with the service role key). You must put SUPABASE_SERVICE_ROLE_KEY and CRON_SECRET in web/.env.local yourself, then call GET /api/index with the bearer header.
+- [x] Indexer verified end to end against the real Supabase project: /api/index refuses missing/wrong secret (401), saves tokens and trades with the service key, second run finds nothing new, cursor saved.
+- [ ] ROTATE SECRETS: the CRON_SECRET and service role key were accidentally printed in the chat transcript on 2026-10-02. Make a new CRON_SECRET, create a new Supabase secret key (and disable the old service_role key), update web/.env.local, restart the site.
 - [ ] Old paused Supabase project "supabase-charcoal-house" left untouched (not ours to change).
 - [ ] Disk is at 98% full: the local test ledger at ~/tl/test-ledger is 3 GB; delete it when the validator is stopped.
 - [ ] Indexer caveats: first run reads at most 5000 transactions back (reports gap:true if more). Vercel Hobby cron runs once a day only; for every-minute runs use Vercel Pro or a free GitHub Actions schedule.
