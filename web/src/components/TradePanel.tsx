@@ -355,7 +355,7 @@ export default function TradePanel({ curve, onTraded, onHeld, paused = false }: 
           ) : null}
 
           <button className="btn btn-sell btn-block" disabled={!wallet || busy || !sellQ || overRoom || overBalance} onClick={submit}>
-            {!wallet ? "Connect a wallet" : busy ? "Waiting for wallet…" : taxBps > 0 ? `Sell and pay ${(taxBps / 100).toFixed(0)}% tax` : "Sell"}
+            {!wallet ? "Connect a wallet" : busy ? "Waiting for wallet…" : taxBps > 0 ? `Sell and pay ${(taxBps / 100).toFixed(taxBps % 100 === 0 ? 0 : 1)}% tax` : "Sell"}
           </button>
         </>
       )}
