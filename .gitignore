@@ -1,0 +1,22 @@
+# dependencies and build output
+node_modules
+target
+.next
+test-ledger
+
+# secrets and local config: never commit these
+.env
+.env.local
+.env.*.local
+*-keypair.json
+*.pem
+id.json
+
+# licensed fonts (see web/public/fonts) must not be shared publicly
+web/public/fonts
+
+# os / editor
+.DS_Store
+.idea
+.vscode
+*.tsbuildinfo
