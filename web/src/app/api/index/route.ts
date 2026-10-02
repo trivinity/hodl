@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { timingSafeEqual } from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import { Connection } from "@solana/web3.js";
 import { RPC_URL, readProgram } from "@/lib/program";
@@ -16,7 +17,10 @@ export async function GET(req: Request) {
   if (!secret || !url || !serviceKey) {
     return NextResponse.json({ error: "Indexer is not configured. Set CRON_SECRET, NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY." }, { status: 503 });
   }
-  if (req.headers.get("authorization") !== `Bearer ${secret}`) {
+  // compare in constant time so the secret cannot be guessed from response timing
+  const given = Buffer.from(req.headers.get("authorization") ?? "");
+  const want = Buffer.from(`Bearer ${secret}`);
+  if (given.length !== want.length || !timingSafeEqual(given, want)) {
     return NextResponse.json({ error: "Not allowed." }, { status: 401 });
   }
   try {

@@ -7,6 +7,9 @@ const {
   createAssociatedTokenAccountIdempotentInstruction,
   createTransferCheckedWithTransferHookInstruction,
   getMint,
+  createApproveInstruction,
+  createSetAuthorityInstruction,
+  AuthorityType,
   getTransferHook,
   getTokenMetadata,
   TOKEN_2022_PROGRAM_ID,
@@ -489,6 +492,31 @@ describe("HODL", () => {
     it("sending tokens to any outside account (like a pool on another exchange) is refused too", async () => {
       const outsider = Keypair.generate();
       await expectError(tryPlainTransfer(m.publicKey, w1, outsider.publicKey, 1_000n), HOOK_REFUSAL);
+    });
+
+    it("a delegate approved by a holder cannot move tokens off the curve either", async () => {
+      const delegate = Keypair.generate();
+      const bal = await balOf(w1);
+      await provider.sendAndConfirm(
+        new Transaction().add(createApproveInstruction(ataOf(w1), delegate.publicKey, w1.publicKey, bal / 2n, [], T22)),
+        [w1]
+      );
+      // the delegate (not the owner) signs a transfer into its own token account
+      const dst = ataFor(m.publicKey, delegate.publicKey);
+      const tx = new Transaction().add(
+        createAssociatedTokenAccountIdempotentInstruction(walletA.publicKey, dst, delegate.publicKey, m.publicKey, T22),
+        await createTransferCheckedWithTransferHookInstruction(provider.connection, ataOf(w1), m.publicKey, dst, delegate.publicKey, 1_000n, 6, [], "confirmed", T22)
+      );
+      await expectError(provider.sendAndConfirm(tx, [delegate]), HOOK_REFUSAL);
+      assert.equal(await balOf(w1), bal);
+    });
+
+    it("a holder cannot hand their token account to another wallet (that would skip the hook)", async () => {
+      const newOwner = Keypair.generate();
+      const tx = new Transaction().add(createSetAuthorityInstruction(ataOf(w1), w1.publicKey, AuthorityType.AccountOwner, newOwner.publicKey, [], T22));
+      await expectError(provider.sendAndConfirm(tx, [w1]), /./); // the token program refuses: the account owner is locked
+      const acct: any = await getAccount(provider.connection, ataOf(w1), "confirmed", T22);
+      assert.equal(acct.owner.toBase58(), w1.publicKey.toBase58(), "owner must be unchanged");
     });
 
     it("selling back to the curve still works, so holders are never trapped", async () => {
