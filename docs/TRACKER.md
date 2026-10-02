@@ -39,10 +39,14 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
 - [ ] "My earnings" page: everything you can claim across tokens
 - [ ] Holder-first discovery: sort by SOL paid to holders, share who kept holding
 - [ ] Devnet deploy + private Vercel preview (password protected)
-- [ ] DEX graduation. Idea (unverified, needs a second read of Meteora docs): graduate into a Meteora DAMM v2 pool with a
-      decaying fee scheduler, and a permanently locked LP position owned by our program whose fees are paid to holders.
-      Carries over: decaying fee (same for everyone), holder fee payouts, anti-snipe. Does NOT carry over: per-wallet hold-time tax and sell limits.
-      To check first: max starting fee, whether a program PDA can own and claim a locked position, how to split payouts without our curve.
+- [ ] DEX graduation. DIRECTION ADOPTED: tokens graduate into a Meteora DAMM v2 pool; the personal hold-time tax and
+      sell limits apply on our curve only. What carries over: a decaying fee for everyone (fee scheduler, 99% max so our 30% start fits),
+      fees paid to holders via a permanently locked LP position owned by our program, anti-snipe from the high starting fee.
+      Checked in Meteora docs: fee scheduler limits (fine), permanent lock still earns claimable fees (fine).
+      Still to prove on devnet: a program-owned account holding the position NFT can claim the fees (docs say claims can be delegated).
+      Still to design: how to split the fees among holders without our curve seeing balances
+      (options: pay by balance at claim time, which brings back flash-hold; or periodic snapshots, which is heavier).
+      Also needed: the UI must label each token's phase (on our curve vs graduated) so nobody assumes the rules still apply.
 - [ ] Token metadata and images (on-chain)
 - [ ] Price chart
 
