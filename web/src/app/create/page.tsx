@@ -57,8 +57,8 @@ export default function Create() {
   if (limit < 1 || limit > 100) problems.push("Wallet sell limit must be between 1 and 100%.");
   if (windowH * 3600 < 60) problems.push("Limit window must be at least 1 minute.");
   if (windowH > 720) problems.push("Limit window can be at most 30 days.");
-  if (windowH > 0 && (limit / windowH) * 24 < 5)
-    problems.push("Holders must be able to sell at least 5% of their tokens per day. Raise the percent or shorten the window.");
+  if (windowH > 0 && (limit / windowH) * 24 < 20)
+    problems.push("Holders must be able to sell at least 20% of their tokens per day. Raise the percent or shorten the window.");
   if (reward < 0 || reward > 100) problems.push("Holder reward share must be between 0 and 100%.");
   if (fee < 0 || creatorFeePct + holderFeePct > 5) problems.push("The total trade fee must be between 0 and 5%.");
   if (devBuy && !(Number(devBuy) > 0)) problems.push("Launch buy must be a positive amount of SOL.");

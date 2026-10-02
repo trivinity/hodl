@@ -309,9 +309,9 @@ describe("HODL", () => {
     };
     await expectError(tryCreate(366 * 86400, 3600), /BadParams|Bad curve parameters/i); // tax fade over a year
     await expectError(tryCreate(3600, 31 * 86400), /BadParams|Bad curve parameters/i); // sell window over 30 days
-    // 50% per window must work out to at least 5% of the balance per day: a 10 day window is the longest allowed
-    await expectError(tryCreate(3600, 11 * 86400), /BadParams|Bad curve parameters/i);
-    await tryCreate(365 * 86400, 10 * 86400); // exactly at the limits is allowed
+    // 50% per window must work out to at least 20% of the balance per day: 2.5 days is the longest window allowed
+    await expectError(tryCreate(3600, 3 * 86400), /BadParams|Bad curve parameters/i);
+    await tryCreate(365 * 86400, 216000); // exactly at the limits is allowed
   });
 
   it("holders can still sell after the curve fills up", async () => {

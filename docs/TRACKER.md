@@ -12,7 +12,7 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
 - [x] Claims capped at what the pool holds (rounding dust can't block the last claimer)
 - [x] Selling stays open after the curve fills (otherwise SOL is locked forever)
 - [x] Caps on tax fade (365d) and sell window (30d) so a token can't be a honeypot by settings
-- [x] Minimum sell speed: every wallet must be able to sell at least 5% of its balance per day
+- [x] Minimum sell speed: every wallet must be able to sell at least 20% of its balance per day
 - [x] Rewards count only tokens still in the wallet
 - [x] Website: browse, launch, trade, tax meter, sell room, rewards box, fee breakdown
 - [x] Site reads chain time instead of the browser clock

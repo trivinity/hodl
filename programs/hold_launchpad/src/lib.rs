@@ -21,8 +21,8 @@ pub const MIN_DECAY_SECS: i64 = 60;
 // upper bounds so a creator cannot launch a token that is effectively impossible to sell
 pub const MAX_DECAY_SECS: i64 = 365 * 86_400;
 pub const MAX_WINDOW_SECS: i64 = 30 * 86_400;
-/// A wallet must be able to sell at least this share of its balance per day (5%), whatever the window length.
-pub const MIN_DAILY_SELL_BPS: u128 = 500;
+/// A wallet must be able to sell at least this share of its balance per day (20%), whatever the window length.
+pub const MIN_DAILY_SELL_BPS: u128 = 2_000;
 
 #[program]
 pub mod hold_launchpad {
