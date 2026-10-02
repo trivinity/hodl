@@ -2,6 +2,7 @@ import * as anchor from "@anchor-lang/core";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import idlJson from "../idl.json";
+import { dbConfigured, dbTrades } from "./db";
 
 export const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || "http://127.0.0.1:8899";
 export const CLUSTER_LABEL = process.env.NEXT_PUBLIC_CLUSTER_LABEL || "localnet";
@@ -155,7 +156,25 @@ export async function getTokenBalance(connection: Connection, mint: PublicKey, o
 
 export type TradeView = { sig: string; isBuy: boolean; trader: string; sol: bigint; tokens: bigint; tax: bigint; rewards: bigint; ts: number };
 
-export async function loadTrades(connection: Connection, program: anchor.Program<any>, curve: PublicKey): Promise<TradeView[]> {
+export async function loadTrades(connection: Connection, program: anchor.Program<any>, curve: PublicKey, mint?: PublicKey): Promise<TradeView[]> {
+  // fast path: the indexed copy in Supabase, if it is set up
+  if (mint && dbConfigured) {
+    try {
+      const rows = await dbTrades(mint.toBase58());
+      return rows.map((r) => ({
+        sig: r.sig,
+        isBuy: r.is_buy,
+        trader: r.trader,
+        sol: BigInt(r.sol),
+        tokens: BigInt(r.tokens),
+        tax: BigInt(r.tax),
+        rewards: BigInt(r.rewards),
+        ts: Math.floor(new Date(r.ts).getTime() / 1000),
+      }));
+    } catch {
+      /* fall through to reading the chain */
+    }
+  }
   const sigs = await connection.getSignaturesForAddress(curve, { limit: 25 });
   const parser = new anchor.EventParser(program.programId, program.coder);
   const out: TradeView[] = [];

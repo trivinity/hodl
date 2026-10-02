@@ -23,7 +23,10 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
 - [x] On-chain token metadata (Metaplex): name, symbol, image link; immutable; covered by a test
 - [x] Deployed to DEVNET (program Eyv8eYAjHonsHQ6awmB4fy1mv2jqXciK8PzooUoV5kmb, max-len 335000, upgrade authority = a devnet-only key kept outside the repo).
       Smoke test passed on devnet: create with metadata, buy, taxed sell, reward claim (cost about 0.11 SOL). Test token A81cK8f3VzVsWewKZFmDoZaWuaqsm4KEB2bFfcaHKwCq
-- [x] Tests: 17 on-chain (yarn test), 18 math (cargo test)
+- [x] CurveCreated event so an indexer can see new tokens
+- [x] Indexer built and tested against the local chain (web/src/lib/indexer.ts, tests/indexer.cts): tokens, trades, claims, no repeated work.
+      Supabase schema in supabase/migrations/0001_init.sql, server route /api/index (needs CRON_SECRET), site reads trades from Supabase when configured.
+- [x] Tests: 18 on-chain (yarn test), 18 math (cargo test)
 
 ## Open: security and correctness
 - [ ] LOW  Reward flash-hold: tokens moved out and back by plain transfer still earn while away.
@@ -54,6 +57,10 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
       (options: pay by balance at claim time, which brings back flash-hold; or periodic snapshots, which is heavier).
       Also needed: the UI must label each token's phase (on our curve vs graduated) so nobody assumes the rules still apply.
 - [ ] Price chart
+
+- [ ] Supabase: create a NEW project for HODL, run supabase/migrations/0001_init.sql, set the env vars in web/.env.local (names in .env.local.example), schedule GET /api/index with the CRON_SECRET bearer header. Not verified against a real Supabase project yet.
+- [ ] Indexer caveats: first run reads at most 5000 transactions back (reports gap:true if more). Vercel Hobby cron runs once a day only; for every-minute runs use Vercel Pro or a free GitHub Actions schedule.
+- [ ] Devnet program has 3.7 KB of headroom (max-len 335000, program 331256). The CurveCreated event is NOT deployed to devnet yet; it needs an upgrade (about 0.001 SOL in fees, refundable buffer rent).
 
 ## Notes
 - Devnet: set `NEXT_PUBLIC_RPC_URL=https://api.devnet.solana.com` and `NEXT_PUBLIC_CLUSTER_LABEL=devnet` (the public RPC is rate limited; use a free provider key for sharing).

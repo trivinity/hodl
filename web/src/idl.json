@@ -1094,6 +1094,19 @@
   ],
   "events": [
     {
+      "name": "CurveCreated",
+      "discriminator": [
+        207,
+        148,
+        202,
+        45,
+        236,
+        100,
+        171,
+        230
+      ]
+    },
+    {
       "name": "RewardsClaimed",
       "discriminator": [
         75,
@@ -1264,6 +1277,66 @@
               "lamports owed to holders and not yet claimed (held in the curve account, outside the price reserves)"
             ],
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CurveCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "type": "pubkey"
+          },
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "symbol",
+            "type": "string"
+          },
+          {
+            "name": "uri",
+            "type": "string"
+          },
+          {
+            "name": "fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "holder_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "max_tax_bps",
+            "type": "u16"
+          },
+          {
+            "name": "decay_secs",
+            "type": "i64"
+          },
+          {
+            "name": "holder_sell_bps",
+            "type": "u16"
+          },
+          {
+            "name": "window_secs",
+            "type": "i64"
+          },
+          {
+            "name": "reward_bps",
+            "type": "u16"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
           }
         ]
       }

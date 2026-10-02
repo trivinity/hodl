@@ -27,7 +27,7 @@ export default function TokenPage({ params }: { params: Promise<{ mint: string }
         return;
       }
       setCurve(c);
-      loadTrades(connection, program, curvePda(mint)).then(setTrades).catch(() => {});
+      loadTrades(connection, program, curvePda(mint), mint).then(setTrades).catch(() => {});
     } catch {
       setMissing(true);
     }

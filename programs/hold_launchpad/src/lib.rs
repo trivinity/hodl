@@ -155,6 +155,23 @@ pub mod hold_launchpad {
             AuthorityType::MintTokens,
             None,
         )?;
+
+        let c = &ctx.accounts.curve;
+        emit!(CurveCreated {
+            mint: mint_key,
+            creator: c.creator,
+            name: c.name.clone(),
+            symbol: c.symbol.clone(),
+            uri: c.uri.clone(),
+            fee_bps: c.fee_bps,
+            holder_fee_bps: c.holder_fee_bps,
+            max_tax_bps: c.max_tax_bps,
+            decay_secs: c.decay_secs,
+            holder_sell_bps: c.holder_sell_bps,
+            window_secs: c.window_secs,
+            reward_bps: c.reward_bps,
+            ts: c.created_at,
+        });
         Ok(())
     }
 
@@ -640,6 +657,23 @@ pub struct Sell<'info> {
 
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
+}
+
+#[event]
+pub struct CurveCreated {
+    pub mint: Pubkey,
+    pub creator: Pubkey,
+    pub name: String,
+    pub symbol: String,
+    pub uri: String,
+    pub fee_bps: u16,
+    pub holder_fee_bps: u16,
+    pub max_tax_bps: u16,
+    pub decay_secs: i64,
+    pub holder_sell_bps: u16,
+    pub window_secs: i64,
+    pub reward_bps: u16,
+    pub ts: i64,
 }
 
 #[event]

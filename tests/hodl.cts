@@ -156,6 +156,17 @@ describe("HODL", () => {
     const c = await fetchCurve();
     assert.equal(c.raw.name, "Diamond Hands");
 
+    // an indexer needs to see token creation: the CurveCreated event is in the creation transaction
+    const sigs = await provider.connection.getSignaturesForAddress(curve, { limit: 5 }, "confirmed");
+    const createSig = sigs[sigs.length - 1].signature;
+    const ctx: any = await provider.connection.getTransaction(createSig, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
+    const created: any = [...new anchor.EventParser(program.programId, program.coder).parseLogs(ctx.meta.logMessages)].find(
+      (e: any) => e.name.toLowerCase() === "curvecreated"
+    );
+    assert.isDefined(created, "CurveCreated event missing");
+    assert.equal(created.data.symbol, "HOLD");
+    assert.equal(created.data.mint.toBase58(), mint.publicKey.toBase58());
+
     // the token also carries its name and symbol on chain (Metaplex metadata), and it cannot be changed
     const META = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
     const [metaPda] = PublicKey.findProgramAddressSync(
