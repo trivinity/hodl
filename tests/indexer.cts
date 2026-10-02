@@ -1,7 +1,8 @@
 const anchor: any = require("@anchor-lang/core");
 const { BN } = anchor;
-const { Keypair, LAMPORTS_PER_SOL, SystemProgram, Transaction } = require("@solana/web3.js");
+const { Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } = require("@solana/web3.js");
 const { assert } = require("chai");
+const { getAccount, getAssociatedTokenAddressSync, TOKEN_2022_PROGRAM_ID } = require("@solana/spl-token");
 const fs = require("fs");
 const path = require("path");
 const { indexOnce, memoryStore } = require("../web/src/lib/indexer.ts");
@@ -23,13 +24,23 @@ describe("indexer", () => {
     );
     await program.methods
       .createCurve("Indexed", "IDX", "", 100, 3000, new BN(3600), 5000, new BN(3600), 5000, 100)
-      .accountsPartial({ creator: creator.publicKey, mint: mint.publicKey })
+      .accountsPartial({
+        creator: creator.publicKey,
+        mint: mint.publicKey,
+        vault: getAssociatedTokenAddressSync(
+          mint.publicKey,
+          PublicKey.findProgramAddressSync([Buffer.from("curve"), mint.publicKey.toBuffer()], program.programId)[0],
+          true,
+          TOKEN_2022_PROGRAM_ID
+        ),
+      })
       .signers([mint])
       .rpc();
     await program.methods.buy(new BN(1 * LAMPORTS_PER_SOL), new BN(0)).accountsPartial({ buyer: creator.publicKey, mint: mint.publicKey }).rpc();
     await program.methods.buy(new BN(1 * LAMPORTS_PER_SOL), new BN(0)).accountsPartial({ buyer: bot.publicKey, mint: mint.publicKey }).signers([bot]).rpc();
-    const { getAccount, getAssociatedTokenAddressSync } = require("@solana/spl-token");
-    const bal = BigInt((await getAccount(provider.connection, getAssociatedTokenAddressSync(mint.publicKey, bot.publicKey))).amount);
+    const bal = BigInt(
+      (await getAccount(provider.connection, getAssociatedTokenAddressSync(mint.publicKey, bot.publicKey, false, TOKEN_2022_PROGRAM_ID), "confirmed", TOKEN_2022_PROGRAM_ID)).amount
+    );
     await program.methods
       .sell(new BN(((bal * 40n) / 100n).toString()), new BN(0))
       .accountsPartial({ seller: bot.publicKey, mint: mint.publicKey })

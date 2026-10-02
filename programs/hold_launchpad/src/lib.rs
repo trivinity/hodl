@@ -1,10 +1,16 @@
 use anchor_lang::prelude::*;
 use anchor_lang::system_program::{self, Transfer as SolTransfer};
-use anchor_spl::associated_token::AssociatedToken;
-use anchor_spl::token::spl_token::instruction::AuthorityType;
-use anchor_spl::token::{
-    self, Mint, MintTo, SetAuthority, Token, TokenAccount, Transfer as SplTransfer,
+use anchor_lang::solana_program::{
+    instruction::{AccountMeta, Instruction},
+    program::{invoke, invoke_signed},
 };
+use anchor_spl::associated_token::{self, AssociatedToken, Create as CreateAta};
+use anchor_spl::token_2022::Token2022;
+use anchor_spl::token_interface::{
+    self, metadata_pointer_initialize, spl_token_2022, token_metadata_initialize, transfer_hook_initialize, InitializeMint2, Mint,
+    MetadataPointerInitialize, MintTo, SetAuthority, TokenAccount, TokenMetadataInitialize, TransferHookInitialize,
+};
+use spl_token_2022::{extension::ExtensionType, instruction::AuthorityType};
 
 pub mod math;
 use math::*;
@@ -12,9 +18,12 @@ use math::*;
 // placeholder, run `anchor keys sync` after the first build
 declare_id!("Eyv8eYAjHonsHQ6awmB4fy1mv2jqXciK8PzooUoV5kmb");
 
-/// Metaplex Token Metadata program: gives the token a name, symbol and image that wallets and DEXs can read.
-pub const METADATA_PROGRAM_ID: Pubkey = pubkey!("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
-pub const METADATA_SEED: &[u8] = b"metadata";
+/// The transfer hook program. Until a token graduates it only lets tokens move by buying or selling on the curve.
+pub const HOOK_PROGRAM_ID: Pubkey = pubkey!("13PKRkQAtxV92pJpM7fXAhxd5a1QGQPJ22o9FLLo7FNA");
+pub const META_LIST_SEED: &[u8] = b"extra-account-metas";
+/// first 8 bytes of sha256("global:initialize_extra_account_meta_list"): the hook program's setup instruction
+const HOOK_INIT_DISCRIMINATOR: [u8; 8] = [92, 197, 174, 197, 41, 124, 19, 3];
+pub const TOKEN_DECIMALS: u8 = 6;
 
 pub const CURVE_SEED: &[u8] = b"curve";
 pub const POSITION_SEED: &[u8] = b"position";
@@ -73,8 +82,8 @@ pub mod hold_launchpad {
         require!(reward_bps <= 10_000, LaunchError::BadParams);
         require!(!ctx.accounts.config.paused, LaunchError::Paused);
 
-        // built before the strings move into the curve account
-        let metadata_ix_data = encode_create_metadata_v3(&name, &symbol, &uri);
+        // copies for the on-chain token metadata, taken before the strings move into the curve account
+        let (md_name, md_symbol, md_uri) = (name.clone(), symbol.clone(), uri.clone());
 
         let mint_key = ctx.accounts.mint.key();
         let bump = ctx.bumps.curve;
@@ -110,54 +119,123 @@ pub mod hold_launchpad {
         let seeds: &[&[u8]] = &[CURVE_SEED, mint_key.as_ref(), &[bump]];
         let signer = &[seeds];
 
-        token::mint_to(
+        let token_program = ctx.accounts.token_program.to_account_info();
+        let token_program_key = token_program.key();
+        let curve_key = ctx.accounts.curve.key();
+        let mint_info = ctx.accounts.mint.to_account_info();
+        let creator_info = ctx.accounts.creator.to_account_info();
+        let curve_info = ctx.accounts.curve.to_account_info();
+
+        // 1. the mint account, sized for the hook, the metadata pointer and the name / symbol / image.
+        //    The account is funded for its final size up front because the metadata is added after.
+        let base_len = ExtensionType::try_calculate_account_len::<spl_token_2022::state::Mint>(&[
+            ExtensionType::TransferHook,
+            ExtensionType::MetadataPointer,
+        ])
+        .map_err(|_| LaunchError::MathError)?;
+        // token metadata entry: 2 byte type + 2 byte length + update authority + mint + three strings + empty extra list
+        let metadata_len = 4 + 32 + 32 + (4 + md_name.len()) + (4 + md_symbol.len()) + (4 + md_uri.len()) + 4;
+        let lamports = Rent::get()?.minimum_balance(base_len + metadata_len);
+        system_program::create_account(
+            CpiContext::new(
+                ctx.accounts.system_program.key(),
+                system_program::CreateAccount { from: creator_info.clone(), to: mint_info.clone() },
+            ),
+            lamports,
+            base_len as u64,
+            &token_program_key,
+        )?;
+
+        // 2. extensions first, then the mint itself
+        // metadata pointer: points at the mint itself, and nobody can ever repoint it
+        metadata_pointer_initialize(
+            CpiContext::new(
+                token_program_key,
+                MetadataPointerInitialize { token_program_id: token_program.clone(), mint: mint_info.clone() },
+            ),
+            None,
+            Some(mint_key),
+        )?;
+        // transfer hook: the curve controls it, so it can be switched off when the token graduates
+        transfer_hook_initialize(
+            CpiContext::new(
+                token_program_key,
+                TransferHookInitialize { token_program_id: token_program.clone(), mint: mint_info.clone() },
+            ),
+            Some(curve_key),
+            Some(HOOK_PROGRAM_ID),
+        )?;
+        token_interface::initialize_mint2(
+            CpiContext::new(token_program_key, InitializeMint2 { mint: mint_info.clone() }),
+            TOKEN_DECIMALS,
+            &curve_key,
+            None, // no freeze authority, ever
+        )?;
+        // name, symbol and image stored inside the mint itself (the curve is the update authority and has no way to change it)
+        token_metadata_initialize(
             CpiContext::new_with_signer(
-                ctx.accounts.token_program.key(),
-                MintTo {
-                    mint: ctx.accounts.mint.to_account_info(),
-                    to: ctx.accounts.vault.to_account_info(),
-                    authority: ctx.accounts.curve.to_account_info(),
+                token_program_key,
+                TokenMetadataInitialize {
+                    program_id: token_program.clone(),
+                    metadata: mint_info.clone(),
+                    update_authority: curve_info.clone(),
+                    mint_authority: curve_info.clone(),
+                    mint: mint_info.clone(),
                 },
+                signer,
+            ),
+            md_name,
+            md_symbol,
+            md_uri,
+        )?;
+
+        // 3. the curve's token account
+        associated_token::create(CpiContext::new(
+            ctx.accounts.associated_token_program.key(),
+            CreateAta {
+                payer: creator_info.clone(),
+                associated_token: ctx.accounts.vault.to_account_info(),
+                authority: curve_info.clone(),
+                mint: mint_info.clone(),
+                system_program: ctx.accounts.system_program.to_account_info(),
+                token_program: token_program.clone(),
+            },
+        ))?;
+
+        // 4. set up the hook's list of extra accounts for this mint (empty, but it must exist)
+        invoke(
+            &Instruction {
+                program_id: HOOK_PROGRAM_ID,
+                accounts: vec![
+                    AccountMeta::new(creator_info.key(), true),
+                    AccountMeta::new(ctx.accounts.meta_list.key(), false),
+                    AccountMeta::new_readonly(mint_key, false),
+                    AccountMeta::new_readonly(ctx.accounts.system_program.key(), false),
+                ],
+                data: HOOK_INIT_DISCRIMINATOR.to_vec(),
+            },
+            &[
+                creator_info.clone(),
+                ctx.accounts.meta_list.to_account_info(),
+                mint_info.clone(),
+                ctx.accounts.system_program.to_account_info(),
+                ctx.accounts.hook_program.to_account_info(),
+            ],
+        )?;
+
+        // 5. mint the whole supply into the curve's account, then give up the right to mint more
+        token_interface::mint_to(
+            CpiContext::new_with_signer(
+                token_program_key,
+                MintTo { mint: mint_info.clone(), to: ctx.accounts.vault.to_account_info(), authority: curve_info.clone() },
                 signer,
             ),
             TOTAL_SUPPLY,
         )?;
-
-        // on-chain name / symbol / image. Immutable, so nobody (including us) can change them later.
-        // The curve signs as both mint authority (still held at this point) and update authority.
-        let curve_key = ctx.accounts.curve.key();
-        let ix = anchor_lang::solana_program::instruction::Instruction {
-            program_id: METADATA_PROGRAM_ID,
-            accounts: vec![
-                AccountMeta::new(ctx.accounts.metadata.key(), false),
-                AccountMeta::new_readonly(mint_key, false),
-                AccountMeta::new_readonly(curve_key, true),
-                AccountMeta::new(ctx.accounts.creator.key(), true),
-                AccountMeta::new_readonly(curve_key, true),
-                AccountMeta::new_readonly(ctx.accounts.system_program.key(), false),
-            ],
-            data: metadata_ix_data,
-        };
-        anchor_lang::solana_program::program::invoke_signed(
-            &ix,
-            &[
-                ctx.accounts.metadata.to_account_info(),
-                ctx.accounts.mint.to_account_info(),
-                ctx.accounts.curve.to_account_info(),
-                ctx.accounts.creator.to_account_info(),
-                ctx.accounts.system_program.to_account_info(),
-                ctx.accounts.metadata_program.to_account_info(),
-            ],
-            signer,
-        )?;
-
-        token::set_authority(
+        token_interface::set_authority(
             CpiContext::new_with_signer(
-                ctx.accounts.token_program.key(),
-                SetAuthority {
-                    current_authority: ctx.accounts.curve.to_account_info(),
-                    account_or_mint: ctx.accounts.mint.to_account_info(),
-                },
+                token_program_key,
+                SetAuthority { current_authority: curve_info.clone(), account_or_mint: mint_info.clone() },
                 signer,
             ),
             AuthorityType::MintTokens,
@@ -246,17 +324,16 @@ pub mod hold_launchpad {
         let mint_key = ctx.accounts.mint.key();
         let bump = ctx.accounts.curve.bump;
         let seeds: &[&[u8]] = &[CURVE_SEED, mint_key.as_ref(), &[bump]];
-        token::transfer(
-            CpiContext::new_with_signer(
-                ctx.accounts.token_program.key(),
-                SplTransfer {
-                    from: ctx.accounts.vault.to_account_info(),
-                    to: ctx.accounts.buyer_ata.to_account_info(),
-                    authority: ctx.accounts.curve.to_account_info(),
-                },
-                &[seeds],
-            ),
+        hook_transfer(
+            &ctx.accounts.token_program.to_account_info(),
+            &ctx.accounts.vault.to_account_info(),
+            &ctx.accounts.mint.to_account_info(),
+            &ctx.accounts.buyer_ata.to_account_info(),
+            &ctx.accounts.curve.to_account_info(),
+            &ctx.accounts.meta_list.to_account_info(),
+            &ctx.accounts.hook_program.to_account_info(),
             q.tokens_out,
+            &[seeds],
         )?;
 
         let curve = &mut ctx.accounts.curve;
@@ -358,16 +435,16 @@ pub mod hold_launchpad {
             .ok_or(LaunchError::MathError)?;
         pos.reward_debt = reward_debt(new_tracked, acc_after).ok_or(LaunchError::MathError)?;
 
-        token::transfer(
-            CpiContext::new(
-                ctx.accounts.token_program.key(),
-                SplTransfer {
-                    from: ctx.accounts.seller_ata.to_account_info(),
-                    to: ctx.accounts.vault.to_account_info(),
-                    authority: ctx.accounts.seller.to_account_info(),
-                },
-            ),
+        hook_transfer(
+            &ctx.accounts.token_program.to_account_info(),
+            &ctx.accounts.seller_ata.to_account_info(),
+            &ctx.accounts.mint.to_account_info(),
+            &ctx.accounts.vault.to_account_info(),
+            &ctx.accounts.seller.to_account_info(),
+            &ctx.accounts.meta_list.to_account_info(),
+            &ctx.accounts.hook_program.to_account_info(),
             tokens_in,
+            &[],
         )?;
 
         let curve_info = ctx.accounts.curve.to_account_info();
@@ -551,24 +628,39 @@ pub mod hold_launchpad {
     }
 }
 
-fn push_borsh_string(buf: &mut Vec<u8>, s: &str) {
-    buf.extend_from_slice(&(s.len() as u32).to_le_bytes());
-    buf.extend_from_slice(s.as_bytes());
-}
-
-/// Borsh bytes for Metaplex `CreateMetadataAccountV3`: no creators, no royalties, no collection, immutable.
-pub fn encode_create_metadata_v3(name: &str, symbol: &str, uri: &str) -> Vec<u8> {
-    let mut d = vec![33u8]; // instruction discriminator
-    push_borsh_string(&mut d, name);
-    push_borsh_string(&mut d, symbol);
-    push_borsh_string(&mut d, uri);
-    d.extend_from_slice(&0u16.to_le_bytes()); // seller_fee_basis_points
-    d.push(0); // creators: None
-    d.push(0); // collection: None
-    d.push(0); // uses: None
-    d.push(0); // is_mutable: false
-    d.push(0); // collection_details: None
-    d
+/// Move tokens with Token-2022, passing along the extra accounts the transfer hook needs.
+/// (Anchor's own transfer helper does not forward them, so the instruction is built here.)
+#[allow(clippy::too_many_arguments)]
+fn hook_transfer<'info>(
+    token_program: &AccountInfo<'info>,
+    from: &AccountInfo<'info>,
+    mint: &AccountInfo<'info>,
+    to: &AccountInfo<'info>,
+    authority: &AccountInfo<'info>,
+    meta_list: &AccountInfo<'info>,
+    hook_program: &AccountInfo<'info>,
+    amount: u64,
+    signer_seeds: &[&[&[u8]]],
+) -> Result<()> {
+    let mut ix = spl_token_2022::instruction::transfer_checked(
+        token_program.key,
+        from.key,
+        mint.key,
+        to.key,
+        authority.key,
+        &[],
+        amount,
+        TOKEN_DECIMALS,
+    )?;
+    // the token program looks for the hook program and the hook's account list after the usual four accounts
+    ix.accounts.push(AccountMeta::new_readonly(*hook_program.key, false));
+    ix.accounts.push(AccountMeta::new_readonly(*meta_list.key, false));
+    invoke_signed(
+        &ix,
+        &[from.clone(), mint.clone(), to.clone(), authority.clone(), hook_program.clone(), meta_list.clone()],
+        signer_seeds,
+    )?;
+    Ok(())
 }
 
 #[account]
@@ -672,6 +764,9 @@ pub struct CreateCurve<'info> {
     #[account(mut)]
     pub creator: Signer<'info>,
 
+    #[account(seeds = [CONFIG_SEED], bump = config.bump)]
+    pub config: Account<'info, Config>,
+
     #[account(
         init,
         payer = creator,
@@ -681,34 +776,23 @@ pub struct CreateCurve<'info> {
     )]
     pub curve: Account<'info, Curve>,
 
-    #[account(init, payer = creator, mint::decimals = 6, mint::authority = curve)]
-    pub mint: Account<'info, Mint>,
+    /// CHECK: the new token's mint. It needs Token-2022 extensions, so create_curve builds it by hand. Must sign.
+    #[account(mut, signer)]
+    pub mint: UncheckedAccount<'info>,
 
-    #[account(
-        init,
-        payer = creator,
-        associated_token::mint = mint,
-        associated_token::authority = curve
-    )]
-    pub vault: Account<'info, TokenAccount>,
+    /// CHECK: the curve's token account (an associated token account), created inside create_curve
+    #[account(mut)]
+    pub vault: UncheckedAccount<'info>,
 
-    #[account(seeds = [CONFIG_SEED], bump = config.bump)]
-    pub config: Account<'info, Config>,
+    /// CHECK: the hook's list of extra accounts for this mint, created by the hook program during create_curve
+    #[account(mut, seeds = [META_LIST_SEED, mint.key().as_ref()], bump, seeds::program = HOOK_PROGRAM_ID)]
+    pub meta_list: UncheckedAccount<'info>,
 
-    /// CHECK: the Metaplex metadata PDA for this mint, created by the CPI in create_curve
-    #[account(
-        mut,
-        seeds = [METADATA_SEED, METADATA_PROGRAM_ID.as_ref(), mint.key().as_ref()],
-        bump,
-        seeds::program = METADATA_PROGRAM_ID
-    )]
-    pub metadata: UncheckedAccount<'info>,
+    /// CHECK: pinned to our hook program
+    #[account(address = HOOK_PROGRAM_ID)]
+    pub hook_program: UncheckedAccount<'info>,
 
-    /// CHECK: pinned to the Metaplex Token Metadata program id
-    #[account(address = METADATA_PROGRAM_ID)]
-    pub metadata_program: UncheckedAccount<'info>,
-
-    pub token_program: Program<'info, Token>,
+    pub token_program: Program<'info, Token2022>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
 }
@@ -724,18 +808,19 @@ pub struct Buy<'info> {
     #[account(mut, seeds = [CURVE_SEED, mint.key().as_ref()], bump = curve.bump, has_one = mint)]
     pub curve: Account<'info, Curve>,
 
-    pub mint: Account<'info, Mint>,
+    pub mint: InterfaceAccount<'info, Mint>,
 
-    #[account(mut, associated_token::mint = mint, associated_token::authority = curve)]
-    pub vault: Account<'info, TokenAccount>,
+    #[account(mut, associated_token::mint = mint, associated_token::authority = curve, associated_token::token_program = token_program)]
+    pub vault: InterfaceAccount<'info, TokenAccount>,
 
     #[account(
         init_if_needed,
         payer = buyer,
         associated_token::mint = mint,
-        associated_token::authority = buyer
+        associated_token::authority = buyer,
+        associated_token::token_program = token_program
     )]
-    pub buyer_ata: Account<'info, TokenAccount>,
+    pub buyer_ata: InterfaceAccount<'info, TokenAccount>,
 
     #[account(
         init_if_needed,
@@ -746,7 +831,15 @@ pub struct Buy<'info> {
     )]
     pub position: Account<'info, Position>,
 
-    pub token_program: Program<'info, Token>,
+    /// CHECK: the hook's list of extra accounts for this mint, derived under the hook program
+    #[account(seeds = [META_LIST_SEED, mint.key().as_ref()], bump, seeds::program = HOOK_PROGRAM_ID)]
+    pub meta_list: UncheckedAccount<'info>,
+
+    /// CHECK: pinned to our hook program
+    #[account(address = HOOK_PROGRAM_ID)]
+    pub hook_program: UncheckedAccount<'info>,
+
+    pub token_program: Program<'info, Token2022>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
 }
@@ -759,13 +852,13 @@ pub struct Sell<'info> {
     #[account(mut, seeds = [CURVE_SEED, mint.key().as_ref()], bump = curve.bump, has_one = mint)]
     pub curve: Account<'info, Curve>,
 
-    pub mint: Account<'info, Mint>,
+    pub mint: InterfaceAccount<'info, Mint>,
 
-    #[account(mut, associated_token::mint = mint, associated_token::authority = curve)]
-    pub vault: Account<'info, TokenAccount>,
+    #[account(mut, associated_token::mint = mint, associated_token::authority = curve, associated_token::token_program = token_program)]
+    pub vault: InterfaceAccount<'info, TokenAccount>,
 
-    #[account(mut, associated_token::mint = mint, associated_token::authority = seller)]
-    pub seller_ata: Account<'info, TokenAccount>,
+    #[account(mut, associated_token::mint = mint, associated_token::authority = seller, associated_token::token_program = token_program)]
+    pub seller_ata: InterfaceAccount<'info, TokenAccount>,
 
     #[account(
         init_if_needed,
@@ -776,7 +869,15 @@ pub struct Sell<'info> {
     )]
     pub position: Account<'info, Position>,
 
-    pub token_program: Program<'info, Token>,
+    /// CHECK: the hook's list of extra accounts for this mint, derived under the hook program
+    #[account(seeds = [META_LIST_SEED, mint.key().as_ref()], bump, seeds::program = HOOK_PROGRAM_ID)]
+    pub meta_list: UncheckedAccount<'info>,
+
+    /// CHECK: pinned to our hook program
+    #[account(address = HOOK_PROGRAM_ID)]
+    pub hook_program: UncheckedAccount<'info>,
+
+    pub token_program: Program<'info, Token2022>,
     pub system_program: Program<'info, System>,
 }
 
@@ -818,10 +919,12 @@ pub struct ClaimRewards<'info> {
     #[account(mut, seeds = [CURVE_SEED, mint.key().as_ref()], bump = curve.bump, has_one = mint)]
     pub curve: Account<'info, Curve>,
 
-    pub mint: Account<'info, Mint>,
+    pub mint: InterfaceAccount<'info, Mint>,
 
-    #[account(associated_token::mint = mint, associated_token::authority = claimer)]
-    pub claimer_ata: Account<'info, TokenAccount>,
+    #[account(associated_token::mint = mint, associated_token::authority = claimer, associated_token::token_program = token_program)]
+    pub claimer_ata: InterfaceAccount<'info, TokenAccount>,
+
+    pub token_program: Program<'info, Token2022>,
 
     #[account(
         mut,

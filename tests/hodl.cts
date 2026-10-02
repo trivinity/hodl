@@ -5,7 +5,11 @@ const {
   getAccount,
   getAssociatedTokenAddressSync,
   createAssociatedTokenAccountIdempotentInstruction,
-  createTransferInstruction,
+  createTransferCheckedWithTransferHookInstruction,
+  getMint,
+  getTransferHook,
+  getTokenMetadata,
+  TOKEN_2022_PROGRAM_ID,
 } = require("@solana/spl-token");
 const { assert } = require("chai");
 const fs = require("fs");
@@ -51,13 +55,31 @@ describe("HODL", () => {
   const mint = Keypair.generate();
   let curve: any;
 
+  // every HODL token is a Token-2022 token with our transfer hook
+  const T22 = TOKEN_2022_PROGRAM_ID;
+  const HOOK_PROGRAM = new PublicKey("13PKRkQAtxV92pJpM7fXAhxd5a1QGQPJ22o9FLLo7FNA");
+  const ataFor = (mintKey: any, owner: any, offCurve = false) => getAssociatedTokenAddressSync(mintKey, owner, offCurve, T22);
+  const acctAmount = async (ata: any) => big((await getAccount(provider.connection, ata, "confirmed", T22)).amount);
+  const vaultOf = (mintKey: any) =>
+    ataFor(mintKey, PublicKey.findProgramAddressSync([Buffer.from("curve"), mintKey.toBuffer()], program.programId)[0], true);
+  // try to move tokens between two token accounts with a plain transfer (the thing the hook must refuse)
+  const tryPlainTransfer = async (mintKey: any, from: any, toOwner: any, amount: bigint) => {
+    const src = ataFor(mintKey, from.publicKey);
+    const dst = ataFor(mintKey, toOwner);
+    const tx = new Transaction().add(
+      createAssociatedTokenAccountIdempotentInstruction(from.publicKey, dst, toOwner, mintKey, T22),
+      await createTransferCheckedWithTransferHookInstruction(provider.connection, src, mintKey, dst, from.publicKey, amount, 6, [], "confirmed", T22)
+    );
+    return provider.sendAndConfirm(tx, [from]);
+  };
+  const HOOK_REFUSAL = /only be bought or sold|OnlyViaCurve/i;
+
   const fetchCurve = async () => {
     const c: any = await (program.account as any).curve.fetch(curve);
     return { vs: big(c.virtualSol), vt: big(c.virtualTokens), realSol: big(c.realSol), rewardPool: big(c.rewardPool), raw: c };
   };
   const tokenBal = async (owner: any) => {
-    const ata = getAssociatedTokenAddressSync(mint.publicKey, owner);
-    return big((await getAccount(provider.connection, ata)).amount);
+    return acctAmount(ataFor(mint.publicKey, owner));
   };
   const lamports = async (k: any) => BigInt(await provider.connection.getBalance(k, "confirmed"));
 
@@ -173,7 +195,7 @@ describe("HODL", () => {
         REWARD_BPS,
         HOLDER_FEE_BPS
       )
-      .accountsPartial({ creator: walletA.publicKey, mint: mint.publicKey })
+      .accountsPartial({ creator: walletA.publicKey, mint: mint.publicKey, vault: vaultOf(mint.publicKey) })
       .signers([mint])
       .rpc();
 
@@ -198,23 +220,18 @@ describe("HODL", () => {
     assert.equal(created.data.symbol, "HOLD");
     assert.equal(created.data.mint.toBase58(), mint.publicKey.toBase58());
 
-    // the token also carries its name and symbol on chain (Metaplex metadata), and it cannot be changed
-    const META = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
-    const [metaPda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("metadata"), META.toBuffer(), mint.publicKey.toBuffer()],
-      META
-    );
-    const metaInfo = await provider.connection.getAccountInfo(metaPda);
-    assert.isNotNull(metaInfo, "metadata account must exist");
-    const text = Buffer.from(metaInfo!.data).toString("utf8");
-    assert.include(text, "Diamond Hands");
-    assert.include(text, "HOLD");
-    assert.equal(metaInfo!.owner.toBase58(), META.toBase58());
-    // Metaplex layout: key(1) update_authority(32) mint(32) name(4+32) symbol(4+10) uri(4+200) fee(2) creators(1) primary_sale(1) is_mutable(1)
-    const d = Buffer.from(metaInfo!.data);
-    assert.equal(new PublicKey(d.subarray(33, 65)).toBase58(), mint.publicKey.toBase58(), "metadata must belong to this mint");
-    assert.equal(d[323], 0, "metadata must be immutable");
-    assert.equal(c.raw.symbol, "HOLD");
+    // Token-2022 token: no one can mint more or freeze, our hook is attached and the curve controls it
+    const mintAcc = await getMint(provider.connection, mint.publicKey, "confirmed", T22);
+    assert.isNull(mintAcc.mintAuthority, "no minting");
+    assert.isNull(mintAcc.freezeAuthority, "no freezing");
+    assert.equal(mintAcc.supply, 1_000_000_000_000_000n);
+    const hook = getTransferHook(mintAcc);
+    assert.equal(hook!.programId.toBase58(), HOOK_PROGRAM.toBase58(), "our hook is attached");
+    assert.equal(hook!.authority.toBase58(), curve.toBase58(), "the curve controls the hook");
+    // name, symbol and image live inside the mint itself
+    const md = await getTokenMetadata(provider.connection, mint.publicKey);
+    assert.equal(md!.name, "Diamond Hands");
+    assert.equal(md!.symbol, "HOLD");
   });
 
   it("two wallets buy", async () => {
@@ -388,7 +405,7 @@ describe("HODL", () => {
       const m = Keypair.generate();
       return program.methods
         .createCurve("Bad", "BAD", "", 100, 3000, new BN(decaySecs), 5000, new BN(windowSecs), 5000, 0)
-        .accountsPartial({ creator: walletA.publicKey, mint: m.publicKey })
+        .accountsPartial({ creator: walletA.publicKey, mint: m.publicKey, vault: vaultOf(m.publicKey) })
         .signers([m])
         .rpc();
     };
@@ -404,7 +421,7 @@ describe("HODL", () => {
     const [c2] = PublicKey.findProgramAddressSync([Buffer.from("curve"), m.publicKey.toBuffer()], program.programId);
     await program.methods
       .createCurve("Full", "FULL", "", 100, 3000, new BN(3600), 5000, new BN(3600), 5000, 0)
-      .accountsPartial({ creator: walletA.publicKey, mint: m.publicKey })
+      .accountsPartial({ creator: walletA.publicKey, mint: m.publicKey, vault: vaultOf(m.publicKey) })
       .signers([m])
       .rpc();
     await program.methods
@@ -413,8 +430,7 @@ describe("HODL", () => {
       .rpc();
     const full: any = await (program.account as any).curve.fetch(c2);
     assert.isTrue(full.complete, "curve should be complete");
-    const ata = getAssociatedTokenAddressSync(m.publicKey, walletA.publicKey);
-    const bal = big((await getAccount(provider.connection, ata)).amount);
+    const bal = await acctAmount(ataFor(m.publicKey, walletA.publicKey));
     await program.methods
       .sell(new BN(((bal * 10n) / 100n).toString()), new BN(0))
       .accountsPartial({ seller: walletA.publicKey, mint: m.publicKey })
@@ -423,16 +439,14 @@ describe("HODL", () => {
     assert.isTrue(big(after.realSol) < big(full.realSol), "the sell should have paid out of the pool");
   });
 
-  describe("wallet splitting", () => {
-    // a short tax fade (60s) so tokens can age inside a test
+  describe("wallet splitting and the transfer hook", () => {
     const m = Keypair.generate();
-    const w1 = Keypair.generate(); // aged holder
-    const w2 = Keypair.generate(); // fresh wallet that only receives transferred tokens
+    const w1 = Keypair.generate(); // buys, then tries to move tokens off the curve
+    const w2 = Keypair.generate(); // would-be receiver
     const w3 = Keypair.generate(); // split-at-buy wallets
     const w4 = Keypair.generate();
-    const [c2] = PublicKey.findProgramAddressSync([Buffer.from("curve"), m.publicKey.toBuffer()], program.programId);
-    const ataOf = (w: any) => getAssociatedTokenAddressSync(m.publicKey, w.publicKey);
-    const balOf = async (w: any) => big((await getAccount(provider.connection, ataOf(w))).amount);
+    const ataOf = (w: any) => ataFor(m.publicKey, w.publicKey);
+    const balOf = (w: any) => acctAmount(ataOf(w));
     const buyM = (w: any, sol: number) =>
       program.methods
         .buy(new BN(sol * LAMPORTS_PER_SOL), new BN(0))
@@ -450,7 +464,6 @@ describe("HODL", () => {
       const parser = new anchor.EventParser(program.programId, program.coder);
       return [...parser.parseLogs(tx.meta.logMessages)].find((e: any) => e.name.toLowerCase() === "trade")!.data as any;
     };
-    const chainTime = async () => (await provider.connection.getBlockTime(await provider.connection.getSlot("confirmed")))!;
 
     before(async () => {
       const tx = new Transaction();
@@ -459,38 +472,28 @@ describe("HODL", () => {
       }
       await provider.sendAndConfirm(tx);
       await program.methods
-        .createCurve("Aged", "AGED", "", 100, 3000, new BN(60), 5000, new BN(3600), 0, 0)
-        .accountsPartial({ creator: walletA.publicKey, mint: m.publicKey })
+        .createCurve("Locked", "LOCK", "", 100, 3000, new BN(3600), 5000, new BN(3600), 0, 0)
+        .accountsPartial({ creator: walletA.publicKey, mint: m.publicKey, vault: vaultOf(m.publicKey) })
         .signers([m])
         .rpc();
     });
 
-    it("tokens sent to a fresh wallet pay the full starting tax, even when the sender's tokens are aged", async () => {
+    it("a plain wallet to wallet transfer is refused by the hook", async () => {
       await buyM(w1, 1);
-      const boughtAt = await chainTime();
-      while ((await chainTime()) - boughtAt < 62) await new Promise((r) => setTimeout(r, 1000));
+      const bal = await balOf(w1);
+      await expectError(tryPlainTransfer(m.publicKey, w1, w2.publicKey, bal / 2n), HOOK_REFUSAL);
+      // nothing moved
+      assert.equal(await balOf(w1), bal);
+    });
 
-      // the sender's own tokens have aged past the 60s fade: no tax
-      const w1bal = await balOf(w1);
-      const aged = await sellM(w1, w1bal / 10n);
-      assert.equal(big(aged.tax), 0n, "aged tokens should pay no tax");
+    it("sending tokens to any outside account (like a pool on another exchange) is refused too", async () => {
+      const outsider = Keypair.generate();
+      await expectError(tryPlainTransfer(m.publicKey, w1, outsider.publicKey, 1_000n), HOOK_REFUSAL);
+    });
 
-      // move half to a brand new wallet that has never bought anything
-      const move = big((await balOf(w1)) / 2n);
-      const t = new Transaction().add(
-        createAssociatedTokenAccountIdempotentInstruction(w1.publicKey, ataOf(w2), w2.publicKey, m.publicKey),
-        createTransferInstruction(ataOf(w1), ataOf(w2), w1.publicKey, move)
-      );
-      await provider.sendAndConfirm(t, [w1]);
-
-      // the fresh wallet sells 40% of what it received: full 30% tax
-      const w2bal = await balOf(w2);
-      assert.equal(w2bal, move);
-      const sellAmt = (w2bal * 40n) / 100n;
-      const st: any = await (program.account as any).curve.fetch(c2);
-      const gross = sellGross(big(st.virtualSol), big(st.virtualTokens), sellAmt);
-      const ev = await sellM(w2, sellAmt);
-      assert.equal(big(ev.tax), (gross * 3000n) / 10000n, "transferred tokens must pay exactly the starting tax");
+    it("selling back to the curve still works, so holders are never trapped", async () => {
+      const ev = await sellM(w1, (await balOf(w1)) / 4n);
+      assert.isTrue(big(ev.sol) > 0n);
     });
 
     it("splitting at buy does not raise the share a person can sell", async () => {
@@ -511,28 +514,27 @@ describe("HODL", () => {
     });
   });
 
-  describe("moving tokens away", () => {
+  describe("holders cannot move tokens away", () => {
     const m = Keypair.generate();
-    const h1 = Keypair.generate(); // buys, then moves everything to a cold wallet
-    const h2 = Keypair.generate(); // keeps holding
-    const cold = Keypair.generate();
+    const h1 = Keypair.generate();
+    const h2 = Keypair.generate();
     const x = Keypair.generate(); // sells early and pays the tax
-    const ataOf = (w: any) => getAssociatedTokenAddressSync(m.publicKey, w.publicKey);
-    const balOf = async (w: any) => big((await getAccount(provider.connection, ataOf(w))).amount);
+    const ataOf = (w: any) => ataFor(m.publicKey, w.publicKey);
+    const balOf = (w: any) => acctAmount(ataOf(w));
     const buyM = (w: any, sol: number) =>
       program.methods.buy(new BN(sol * LAMPORTS_PER_SOL), new BN(0)).accountsPartial({ buyer: w.publicKey, mint: m.publicKey }).signers([w]).rpc();
     const claimM = (w: any) =>
       program.methods.claimRewards().accountsPartial({ claimer: w.publicKey, mint: m.publicKey }).signers([w]).rpc();
 
-    it("a wallet that moved all its tokens away earns nothing more, and the holder who stayed does", async () => {
+    it("every holder keeps earning and can claim, because tokens cannot be parked elsewhere", async () => {
       const fund = new Transaction();
       for (const w of [h1, h2, x]) {
         fund.add(SystemProgram.transfer({ fromPubkey: walletA.publicKey, toPubkey: w.publicKey, lamports: 3 * LAMPORTS_PER_SOL }));
       }
       await provider.sendAndConfirm(fund);
       await program.methods
-        .createCurve("Moved", "MOVE", "", 100, 3000, new BN(3600), 5000, new BN(3600), 5000, 0)
-        .accountsPartial({ creator: walletA.publicKey, mint: m.publicKey })
+        .createCurve("Stay", "STAY", "", 100, 3000, new BN(3600), 5000, new BN(3600), 5000, 0)
+        .accountsPartial({ creator: walletA.publicKey, mint: m.publicKey, vault: vaultOf(m.publicKey) })
         .signers([m])
         .rpc();
 
@@ -540,16 +542,10 @@ describe("HODL", () => {
       await buyM(h2, 1);
       await buyM(x, 2);
 
-      // h1 sends every token to a cold wallet with a plain token transfer
+      // h1 tries to park everything in a cold wallet: refused
       const all = await balOf(h1);
-      await provider.sendAndConfirm(
-        new Transaction().add(
-          createAssociatedTokenAccountIdempotentInstruction(h1.publicKey, ataOf(cold), cold.publicKey, m.publicKey),
-          createTransferInstruction(ataOf(h1), ataOf(cold), h1.publicKey, all)
-        ),
-        [h1]
-      );
-      assert.equal(await balOf(h1), 0n);
+      await expectError(tryPlainTransfer(m.publicKey, h1, Keypair.generate().publicKey, all), HOOK_REFUSAL);
+      assert.equal(await balOf(h1), all, "h1 still holds everything");
 
       // someone sells early, so half of the tax goes to holders
       const xBal = await balOf(x);
@@ -559,11 +555,12 @@ describe("HODL", () => {
         .signers([x])
         .rpc();
 
-      // h1 holds nothing now: nothing to claim. h2 stayed: gets paid.
-      await expectError(claimM(h1), /NothingToClaim|No fees to claim/i);
-      const before = await lamports(h2.publicKey);
-      await claimM(h2);
-      assert.isTrue((await lamports(h2.publicKey)) > before, "the holder who stayed should have been paid");
+      // both holders are paid
+      for (const h of [h1, h2]) {
+        const before = await lamports(h.publicKey);
+        await claimM(h);
+        assert.isTrue((await lamports(h.publicKey)) > before, "holder should have been paid");
+      }
     });
   });
 
@@ -573,7 +570,7 @@ describe("HODL", () => {
     const createTok = (m: any) =>
       program.methods
         .createCurve("Paused", "PAUSE", "", 100, 3000, new BN(3600), 5000, new BN(3600), 5000, 0)
-        .accountsPartial({ creator: walletA.publicKey, mint: m.publicKey })
+        .accountsPartial({ creator: walletA.publicKey, mint: m.publicKey, vault: vaultOf(m.publicKey) })
         .signers([m])
         .rpc();
 
