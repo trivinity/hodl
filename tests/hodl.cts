@@ -135,7 +135,7 @@ describe("HODL", () => {
     if (!(await (program.account as any).config.fetchNullable(configPda))) {
       await program.methods
         .initConfig(treasury.publicKey, PLATFORM_FEE_BPS)
-        .accountsPartial({ authority: walletA.publicKey, program: program.programId, programData })
+        .accountsPartial({ authority: walletA.publicKey, programData })
         .rpc();
     }
     const cfg: any = await fetchConfig();
@@ -668,7 +668,7 @@ describe("HODL", () => {
 
     it("setup can only be done once", async () => {
       await expectError(
-        program.methods.initConfig(treasury.publicKey, 100).accountsPartial({ authority: walletA.publicKey, program: program.programId, programData }).rpc(),
+        program.methods.initConfig(treasury.publicKey, 100).accountsPartial({ authority: walletA.publicKey, programData }).rpc(),
         /already in use|custom program error|0x0/i
       );
     });

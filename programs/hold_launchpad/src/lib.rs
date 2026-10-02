@@ -22,6 +22,7 @@ pub const MAX_FEE_BPS: u16 = 500;
 /// The platform fee for new tokens can never be set above 2%.
 pub const MAX_PLATFORM_FEE_BPS: u16 = 200;
 pub const CONFIG_SEED: &[u8] = b"config";
+pub const BPF_LOADER_UPGRADEABLE: Pubkey = pubkey!("BPFLoaderUpgradeab1e11111111111111111111111");
 pub const MAX_TAX_BPS: u16 = 5_000; // 50% hard ceiling on the early-sell tax
 pub const MIN_WINDOW_SECS: i64 = 60;
 pub const MIN_DECAY_SECS: i64 = 60;
@@ -461,6 +462,20 @@ pub mod hold_launchpad {
     /// One-time setup, only by the program's upgrade authority. The admin starts as that authority and can hand over to a multisig.
     pub fn init_config(ctx: Context<InitConfig>, treasury: Pubkey, platform_fee_bps: u16) -> Result<()> {
         require!(platform_fee_bps <= MAX_PLATFORM_FEE_BPS, LaunchError::BadParams);
+
+        // only whoever controls upgrades of this program may do the one-time setup, so nobody can front-run it.
+        // Checked by hand (small): the program data account must be the real one, and its stored upgrade authority must be the signer.
+        let (expected, _) = Pubkey::find_program_address(&[crate::ID.as_ref()], &BPF_LOADER_UPGRADEABLE);
+        require_keys_eq!(ctx.accounts.program_data.key(), expected, LaunchError::Unauthorized);
+        {
+            let data = ctx.accounts.program_data.try_borrow_data()?;
+            // layout: u32 tag (3 = ProgramData), u64 slot, then Option<Pubkey> (1 tag byte + 32 bytes)
+            require!(
+                data.len() >= 45 && data[0..4] == [3, 0, 0, 0] && data[12] == 1 && data[13..45] == ctx.accounts.authority.key().to_bytes(),
+                LaunchError::Unauthorized
+            );
+        }
+
         let c = &mut ctx.accounts.config;
         c.admin = ctx.accounts.authority.key();
         c.pending_admin = Pubkey::default();
@@ -824,14 +839,8 @@ pub struct InitConfig<'info> {
     #[account(init, payer = authority, space = 8 + Config::INIT_SPACE, seeds = [CONFIG_SEED], bump)]
     pub config: Account<'info, Config>,
 
-    pub program: Program<'info, crate::program::HoldLaunchpad>,
-
-    // only whoever controls upgrades of this program may set it up, so nobody can front-run the first call
-    #[account(
-        constraint = program.programdata_address()? == Some(program_data.key()) @ LaunchError::Unauthorized,
-        constraint = program_data.upgrade_authority_address == Some(authority.key()) @ LaunchError::Unauthorized
-    )]
-    pub program_data: Account<'info, ProgramData>,
+    /// CHECK: the upgradeable loader's data account for this program; verified by hand in init_config
+    pub program_data: UncheckedAccount<'info>,
 
     pub system_program: Program<'info, System>,
 }
