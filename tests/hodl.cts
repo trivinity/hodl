@@ -155,6 +155,23 @@ describe("HODL", () => {
     assert.isNull(parsed.mintAuthority, "mint authority must be revoked");
     const c = await fetchCurve();
     assert.equal(c.raw.name, "Diamond Hands");
+
+    // the token also carries its name and symbol on chain (Metaplex metadata), and it cannot be changed
+    const META = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
+    const [metaPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("metadata"), META.toBuffer(), mint.publicKey.toBuffer()],
+      META
+    );
+    const metaInfo = await provider.connection.getAccountInfo(metaPda);
+    assert.isNotNull(metaInfo, "metadata account must exist");
+    const text = Buffer.from(metaInfo!.data).toString("utf8");
+    assert.include(text, "Diamond Hands");
+    assert.include(text, "HOLD");
+    assert.equal(metaInfo!.owner.toBase58(), META.toBase58());
+    // Metaplex layout: key(1) update_authority(32) mint(32) name(4+32) symbol(4+10) uri(4+200) fee(2) creators(1) primary_sale(1) is_mutable(1)
+    const d = Buffer.from(metaInfo!.data);
+    assert.equal(new PublicKey(d.subarray(33, 65)).toBase58(), mint.publicKey.toBase58(), "metadata must belong to this mint");
+    assert.equal(d[323], 0, "metadata must be immutable");
     assert.equal(c.raw.symbol, "HOLD");
   });
 

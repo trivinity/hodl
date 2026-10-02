@@ -12,6 +12,10 @@ use math::*;
 // placeholder, run `anchor keys sync` after the first build
 declare_id!("Eyv8eYAjHonsHQ6awmB4fy1mv2jqXciK8PzooUoV5kmb");
 
+/// Metaplex Token Metadata program: gives the token a name, symbol and image that wallets and DEXs can read.
+pub const METADATA_PROGRAM_ID: Pubkey = pubkey!("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
+pub const METADATA_SEED: &[u8] = b"metadata";
+
 pub const CURVE_SEED: &[u8] = b"curve";
 pub const POSITION_SEED: &[u8] = b"position";
 pub const MAX_FEE_BPS: u16 = 500;
@@ -64,6 +68,9 @@ pub mod hold_launchpad {
         );
         require!(reward_bps <= 10_000, LaunchError::BadParams);
 
+        // built before the strings move into the curve account
+        let metadata_ix_data = encode_create_metadata_v3(&name, &symbol, &uri);
+
         let mint_key = ctx.accounts.mint.key();
         let bump = ctx.bumps.curve;
 
@@ -106,6 +113,34 @@ pub mod hold_launchpad {
                 signer,
             ),
             TOTAL_SUPPLY,
+        )?;
+
+        // on-chain name / symbol / image. Immutable, so nobody (including us) can change them later.
+        // The curve signs as both mint authority (still held at this point) and update authority.
+        let curve_key = ctx.accounts.curve.key();
+        let ix = anchor_lang::solana_program::instruction::Instruction {
+            program_id: METADATA_PROGRAM_ID,
+            accounts: vec![
+                AccountMeta::new(ctx.accounts.metadata.key(), false),
+                AccountMeta::new_readonly(mint_key, false),
+                AccountMeta::new_readonly(curve_key, true),
+                AccountMeta::new(ctx.accounts.creator.key(), true),
+                AccountMeta::new_readonly(curve_key, true),
+                AccountMeta::new_readonly(ctx.accounts.system_program.key(), false),
+            ],
+            data: metadata_ix_data,
+        };
+        anchor_lang::solana_program::program::invoke_signed(
+            &ix,
+            &[
+                ctx.accounts.metadata.to_account_info(),
+                ctx.accounts.mint.to_account_info(),
+                ctx.accounts.curve.to_account_info(),
+                ctx.accounts.creator.to_account_info(),
+                ctx.accounts.system_program.to_account_info(),
+                ctx.accounts.metadata_program.to_account_info(),
+            ],
+            signer,
         )?;
 
         token::set_authority(
@@ -405,6 +440,26 @@ pub mod hold_launchpad {
     }
 }
 
+fn push_borsh_string(buf: &mut Vec<u8>, s: &str) {
+    buf.extend_from_slice(&(s.len() as u32).to_le_bytes());
+    buf.extend_from_slice(s.as_bytes());
+}
+
+/// Borsh bytes for Metaplex `CreateMetadataAccountV3`: no creators, no royalties, no collection, immutable.
+pub fn encode_create_metadata_v3(name: &str, symbol: &str, uri: &str) -> Vec<u8> {
+    let mut d = vec![33u8]; // instruction discriminator
+    push_borsh_string(&mut d, name);
+    push_borsh_string(&mut d, symbol);
+    push_borsh_string(&mut d, uri);
+    d.extend_from_slice(&0u16.to_le_bytes()); // seller_fee_basis_points
+    d.push(0); // creators: None
+    d.push(0); // collection: None
+    d.push(0); // uses: None
+    d.push(0); // is_mutable: false
+    d.push(0); // collection_details: None
+    d
+}
+
 #[account]
 #[derive(InitSpace)]
 pub struct Curve {
@@ -504,6 +559,19 @@ pub struct CreateCurve<'info> {
         associated_token::authority = curve
     )]
     pub vault: Account<'info, TokenAccount>,
+
+    /// CHECK: the Metaplex metadata PDA for this mint, created by the CPI in create_curve
+    #[account(
+        mut,
+        seeds = [METADATA_SEED, METADATA_PROGRAM_ID.as_ref(), mint.key().as_ref()],
+        bump,
+        seeds::program = METADATA_PROGRAM_ID
+    )]
+    pub metadata: UncheckedAccount<'info>,
+
+    /// CHECK: pinned to the Metaplex Token Metadata program id
+    #[account(address = METADATA_PROGRAM_ID)]
+    pub metadata_program: UncheckedAccount<'info>,
 
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,

@@ -20,6 +20,7 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
 - [x] Security headers, https-only token images
 - [x] Wallet splitting is not a loophole: limit is a % of each wallet's balance, and tokens moved to a fresh wallet pay the full starting tax (both covered by tests)
 - [x] Moved tokens stop earning, covered by a test
+- [x] On-chain token metadata (Metaplex): name, symbol, image link; immutable; covered by a test
 - [x] Tests: 17 on-chain (yarn test), 18 math (cargo test)
 
 ## Open: security and correctness
@@ -50,10 +51,9 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
       Still to design: how to split the fees among holders without our curve seeing balances
       (options: pay by balance at claim time, which brings back flash-hold; or periodic snapshots, which is heavier).
       Also needed: the UI must label each token's phase (on our curve vs graduated) so nobody assumes the rules still apply.
-- [ ] Token metadata and images (on-chain)
 - [ ] Price chart
 
 ## Notes
-- Local run: validator `solana-test-validator` (run it in a terminal tab), then `cd web && npm run dev`.
+- Local run: validator needs the Metaplex program copied from devnet: `solana-test-validator --reset --url devnet --clone-upgradeable-program metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s` (run it in a terminal tab), then `cd web && npm run dev`.
 - Never commit: `*-keypair.json`, `.env.local`, licensed fonts.
 - Tests: `ANCHOR_PROVIDER_URL=http://localhost:8899 ANCHOR_WALLET=~/.config/solana/id.json yarn test` and `cargo test`.
