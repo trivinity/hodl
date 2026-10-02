@@ -5,7 +5,8 @@
 //   node scripts/admin.cjs set-paused true|false  --yes
 //   node scripts/admin.cjs set-fee <bps>          --yes   (platform fee for NEW tokens, max 200)
 //   node scripts/admin.cjs set-treasury <address> --yes
-//   node scripts/admin.cjs propose-admin <address> --yes  (step 1 of handing admin to a multisig)
+//   node scripts/admin.cjs propose-admin <address> --yes  (step 1 of handing admin to someone else)
+//   node scripts/admin.cjs accept-admin --yes             (step 2: run with the WALLET of the proposed admin)
 //   node scripts/admin.cjs init <treasury> <fee-bps> --yes (one time, upgrade authority only)
 //
 // Environment:  RPC_URL (default http://127.0.0.1:8899)   WALLET (default ~/.config/solana/id.json)
@@ -66,6 +67,8 @@ const lamportsToSol = (n) => (Number(n) / 1e9).toFixed(4);
   } else if (cmd === "propose-admin") {
     const n = new PublicKey(need(a1, "new admin address"));
     build = () => program.methods.proposeAdmin(n).accountsPartial({ admin: kp.publicKey }).rpc();
+  } else if (cmd === "accept-admin") {
+    build = () => program.methods.acceptAdmin().accountsPartial({ newAdmin: kp.publicKey }).rpc();
   } else if (cmd === "init") {
     const t = new PublicKey(need(a1, "treasury address"));
     const bps = Number(need(a2, "fee in basis points"));

@@ -32,6 +32,8 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
 - [x] Site shows the platform fee line, a paused banner, disabled Buy while paused, and a notice on the Launch page
 - [x] Indexer and database record the platform fee (migration 0002 applied to the hodl project)
 - [x] Program size trimmed to 351,944 bytes (size-optimized build, manual upgrade-authority check)
+- [x] Admin page at /admin (not in the menu): pause button, platform fee for new tokens, treasury, two-step admin handover. Anyone can read it; only the admin wallet sees controls.
+- [x] Code is on GitHub (private): https://github.com/trivinity/hodl
 - [x] Tests: 24 on-chain (yarn test), 19 math (cargo test)
 
 ## Open: security and correctness

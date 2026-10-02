@@ -32,12 +32,20 @@ export function configPda() {
   return PublicKey.findProgramAddressSync([Buffer.from("config")], PROGRAM_ID)[0];
 }
 
-export type ConfigView = { admin: string; treasury: string; platformFeeBps: number; paused: boolean };
+export type ConfigView = { admin: string; pendingAdmin: string | null; treasury: string; platformFeeBps: number; paused: boolean };
 
 /** global settings: whether trading is paused and the platform fee for new tokens. null if the program was never set up */
 export async function getConfig(program: anchor.Program<any>): Promise<ConfigView | null> {
   const c = await (program.account as any).config.fetchNullable(configPda());
-  return c ? { admin: c.admin.toBase58(), treasury: c.treasury.toBase58(), platformFeeBps: c.platformFeeBps, paused: c.paused } : null;
+  return c
+    ? {
+        admin: c.admin.toBase58(),
+        pendingAdmin: c.pendingAdmin.equals(PublicKey.default) ? null : c.pendingAdmin.toBase58(),
+        treasury: c.treasury.toBase58(),
+        platformFeeBps: c.platformFeeBps,
+        paused: c.paused,
+      }
+    : null;
 }
 
 export function curvePda(mint: PublicKey) {
