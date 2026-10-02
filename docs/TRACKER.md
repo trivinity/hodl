@@ -52,7 +52,8 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
 - [ ] UX  A wallet that moves all its tokens away forfeits rewards it had not claimed yet. Site must warn: claim before moving tokens
 
 - [ ] PARKED (decided: not needed initially): put the upgrade authority, admin and treasury under a multisig. Guide ready in docs/MULTISIG.md. Until then ONE wallet controls upgrades and the admin powers. Do before mainnet.
-- [ ] Devnet still runs the OLD program (no Config, no platform fee, no pause, no CurveCreated event). To update: extend the program by about 17 KB (about 0.12 devnet SOL), upgrade, then run: node scripts/admin.cjs init <treasury> 100 --yes with RPC_URL set to devnet.
+- [x] Devnet UPGRADED to the current program (extended to 355,000 bytes; config set up with a 1% fee and treasury 7EFW2Z5tBJAQ82VYRbUQJUMsURo6pv72nj5hao9vYJro; admin = the devnet-only deploy key FZY4Wv26C5nzsFVL6JWGypP2xB1pesYUBfkZ6eFseiUf).
+      Verified on devnet: token locks in the 1% platform fee, platform fees paid to the treasury (exact amount), buys refused while paused, selling works while paused, resume, holder rewards claim. Test token 6Yhz8iDWsM9EtqCjfaJpdLwUywsRTD9iHDn7yQHEJ6xP. Cost 0.19 SOL; deployer has about 2.89 SOL left.
 
 ## Open: product
 - [ ] Richer home page: totals strip, token cards with sparkline, activity ticker
@@ -79,6 +80,7 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
 - [ ] Devnet program has 3.7 KB of headroom (max-len 335000, program 331256). The CurveCreated event is NOT deployed to devnet yet; it needs an upgrade (about 0.001 SOL in fees, refundable buffer rent).
 
 ## Notes
+- Run the admin tool against devnet: `RPC_URL=https://api.devnet.solana.com WALLET=<devnet deploy key file> node scripts/admin.cjs show`.
 - Devnet: set `NEXT_PUBLIC_RPC_URL=https://api.devnet.solana.com` and `NEXT_PUBLIC_CLUSTER_LABEL=devnet` (the public RPC is rate limited; use a free provider key for sharing).
 - Devnet SOL is scarce: the public faucet is rate limited. Do not run the full test suite on devnet (it needs about 20 SOL).
 - Local run: validator needs the Metaplex program copied from devnet: `solana-test-validator --reset --url devnet --clone-upgradeable-program metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s` (run it in a terminal tab), then `cd web && npm run dev`.
