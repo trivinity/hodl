@@ -22,7 +22,10 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
 - [x] Tests: 16 on-chain (yarn test), 18 math (cargo test)
 
 ## Open: security and correctness
-- [ ] MED  Timed token moves can still game rewards (flash-hold). Real fix: Token-2022 transfer hook
+- [ ] LOW (rises to MED once a DEX exists)  Reward flash-hold: tokens moved out and back by plain transfer still earn while away.
+      Low today because the only market is our curve, which re-checks balances on every trade.
+      Real fix is a Token-2022 transfer hook, built together with graduation. BLOCKED on graduation.
+- [ ] Research before building the hook: do the target DEXs (Meteora, Raydium, Orca) actually run transfer hooks on swaps? Test on devnet. Unconfirmed as of now.
 - [ ] MED  No test for the "moved tokens stop earning" rule
 - [ ] LOW  Creator sees every viewer's IP via the token image URL. Fix: image proxy or upload
 - [ ] LOW  npm audit: 22 findings inside Solana/Anchor libraries, no safe fix yet. Re-check on upgrades
