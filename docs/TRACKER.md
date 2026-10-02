@@ -12,6 +12,7 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
 - [x] Claims capped at what the pool holds (rounding dust can't block the last claimer)
 - [x] Selling stays open after the curve fills (otherwise SOL is locked forever)
 - [x] Caps on tax fade (365d) and sell window (30d) so a token can't be a honeypot by settings
+- [x] Minimum sell speed: every wallet must be able to sell at least 5% of its balance per day
 - [x] Rewards count only tokens still in the wallet
 - [x] Website: browse, launch, trade, tax meter, sell room, rewards box, fee breakdown
 - [x] Site reads chain time instead of the browser clock
@@ -22,7 +23,6 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
 ## Open: security and correctness
 - [ ] MED  Many wallets beat the per-wallet sell limit (a whale can split up). Decide: accept, or add a cost
 - [ ] MED  Timed token moves can still game rewards (flash-hold). Real fix: Token-2022 transfer hook
-- [ ] MED  Minimum sell share is 1% per window, which is honeypot-like. Proposal: raise to 5%
 - [ ] MED  No test for the "moved tokens stop earning" rule
 - [ ] LOW  Creator sees every viewer's IP via the token image URL. Fix: image proxy or upload
 - [ ] LOW  npm audit: 22 findings inside Solana/Anchor libraries, no safe fix yet. Re-check on upgrades

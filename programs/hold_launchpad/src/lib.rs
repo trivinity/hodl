@@ -21,6 +21,8 @@ pub const MIN_DECAY_SECS: i64 = 60;
 // upper bounds so a creator cannot launch a token that is effectively impossible to sell
 pub const MAX_DECAY_SECS: i64 = 365 * 86_400;
 pub const MAX_WINDOW_SECS: i64 = 30 * 86_400;
+/// A wallet must be able to sell at least this share of its balance per day (5%), whatever the window length.
+pub const MIN_DAILY_SELL_BPS: u128 = 500;
 
 #[program]
 pub mod hold_launchpad {
@@ -55,6 +57,11 @@ pub mod hold_launchpad {
         require!(decay_secs >= MIN_DECAY_SECS && decay_secs <= MAX_DECAY_SECS, LaunchError::BadParams);
         require!(holder_sell_bps >= 100 && holder_sell_bps <= 10_000, LaunchError::BadParams);
         require!(window_secs >= MIN_WINDOW_SECS && window_secs <= MAX_WINDOW_SECS, LaunchError::BadParams);
+        // sell speed per day = holder_sell_bps * 1 day / window. Must be at least MIN_DAILY_SELL_BPS.
+        require!(
+            (holder_sell_bps as u128) * 86_400 >= MIN_DAILY_SELL_BPS * (window_secs as u128),
+            LaunchError::BadParams
+        );
         require!(reward_bps <= 10_000, LaunchError::BadParams);
 
         let mint_key = ctx.accounts.mint.key();
