@@ -22,11 +22,13 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
 - [x] Tests: 16 on-chain (yarn test), 18 math (cargo test)
 
 ## Open: security and correctness
-- [ ] LOW (rises to MED once a DEX exists)  Reward flash-hold: tokens moved out and back by plain transfer still earn while away.
+- [ ] LOW  Reward flash-hold: tokens moved out and back by plain transfer still earn while away.
       Low today because the only market is our curve, which re-checks balances on every trade.
-      Real fix is a Token-2022 transfer hook, built together with graduation. BLOCKED on graduation.
-- [ ] Research before building the hook: do the target DEXs (Meteora, Raydium, Orca) actually run transfer hooks on swaps? Test on devnet. Unconfirmed as of now.
-- [ ] MED  No test for the "moved tokens stop earning" rule
+      FINDING (checked on the DEX docs): a Token-2022 transfer hook does NOT fix this where it matters.
+        Meteora DAMM v2 revokes the hook at graduation. Orca needs a manual Token Badge. Raydium unconfirmed.
+      So the hook would only work while a token is still on our own curve, where we already see every trade.
+      DECISION NEEDED: after graduation, either (1) the rules end and the token is a plain token on a DEX,
+      or (2) tokens never leave our curve, so every rule stays enforceable. Pick before building graduation.
 - [ ] LOW  Creator sees every viewer's IP via the token image URL. Fix: image proxy or upload
 - [ ] LOW  npm audit: 22 findings inside Solana/Anchor libraries, no safe fix yet. Re-check on upgrades
 - [ ] LOW  CURVE_ACCOUNT_SIZE in web/src/lib/program.ts is hardcoded. Update if the Curve struct changes
