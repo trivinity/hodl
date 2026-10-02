@@ -19,8 +19,9 @@ export function compact(n: number, digits = 2): string {
 export function price(p: number): string {
   if (p === 0) return "0";
   if (p >= 0.01) return p.toFixed(4);
-  // small numbers: keep 3 significant digits
-  return p.toPrecision(3);
+  // small numbers: keep 3 significant digits but write them out in full (never 3.10e-8)
+  const decimals = Math.min(20, -Math.floor(Math.log10(p)) + 2);
+  return p.toFixed(decimals);
 }
 
 export function duration(secs: number): string {
