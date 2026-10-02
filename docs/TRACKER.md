@@ -58,7 +58,11 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
       Also needed: the UI must label each token's phase (on our curve vs graduated) so nobody assumes the rules still apply.
 - [ ] Price chart
 
-- [ ] Supabase: create a NEW project for HODL, run supabase/migrations/0001_init.sql, set the env vars in web/.env.local (names in .env.local.example), schedule GET /api/index with the CRON_SECRET bearer header. Not verified against a real Supabase project yet.
+- [x] Supabase project "hodl" created (free tier, us-east-1, ref puamkthzhgibhzfjrktl) and the schema applied. Security advisor: clean (one INFO about indexer_state having no policies, which is intended).
+      Verified with the public key: reads work, inserts refused, deletes change nothing, indexer_state hidden. Public URL + anon key are in web/.env.local.
+- [ ] Supabase: STILL UNVERIFIED the server writes (supabaseStore with the service role key). You must put SUPABASE_SERVICE_ROLE_KEY and CRON_SECRET in web/.env.local yourself, then call GET /api/index with the bearer header.
+- [ ] Old paused Supabase project "supabase-charcoal-house" left untouched (not ours to change).
+- [ ] Disk is at 98% full: the local test ledger at ~/tl/test-ledger is 3 GB; delete it when the validator is stopped.
 - [ ] Indexer caveats: first run reads at most 5000 transactions back (reports gap:true if more). Vercel Hobby cron runs once a day only; for every-minute runs use Vercel Pro or a free GitHub Actions schedule.
 - [ ] Devnet program has 3.7 KB of headroom (max-len 335000, program 331256). The CurveCreated event is NOT deployed to devnet yet; it needs an upgrade (about 0.001 SOL in fees, refundable buffer rent).
 

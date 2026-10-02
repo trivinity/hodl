@@ -1,4 +1,4 @@
--- HODL indexer schema. Run this once in the Supabase SQL editor of a NEW project made for HODL.
+-- HODL indexer schema. Applied to the Supabase project 'hodl'. For a fresh project, run it once in the SQL editor.
 -- Reads are public (anon key, read-only). Writes happen only from the server with the service role key,
 -- which bypasses row level security, so no insert or update policies are defined on purpose.
 
@@ -67,8 +67,8 @@ select
   coalesce(sum(t.sol), 0)::bigint                        as volume_lamports,
   coalesce(sum(t.rewards + t.fee_to_holders), 0)::bigint as paid_to_holders_lamports,
   coalesce(sum(t.tax), 0)::bigint                        as tax_lamports,
-  (select virtual_sol    from trades l where l.mint = c.mint order by l.ts desc, l.idx desc limit 1) as last_virtual_sol,
-  (select virtual_tokens from trades l where l.mint = c.mint order by l.ts desc, l.idx desc limit 1) as last_virtual_tokens
+  (select virtual_sol    from trades l where l.mint = c.mint order by l.slot desc, l.idx desc limit 1) as last_virtual_sol,
+  (select virtual_tokens from trades l where l.mint = c.mint order by l.slot desc, l.idx desc limit 1) as last_virtual_tokens
 from curves c
 left join trades t on t.mint = c.mint
 group by c.mint;

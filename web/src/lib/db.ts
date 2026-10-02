@@ -25,7 +25,7 @@ export type DbTrade = {
 };
 
 export function dbTrades(mint: string, limit = 25) {
-  return rest<DbTrade[]>(`trades?select=sig,is_buy,trader,sol,tokens,tax,rewards,fee_to_holders,ts&mint=eq.${encodeURIComponent(mint)}&order=ts.desc,idx.desc&limit=${limit}`);
+  return rest<DbTrade[]>(`trades?select=sig,is_buy,trader,sol,tokens,tax,rewards,fee_to_holders,ts&mint=eq.${encodeURIComponent(mint)}&order=slot.desc,idx.desc&limit=${limit}`);
 }
 
 export type PlatformStats = { token_count: number; volume_lamports: number; paid_to_holders_lamports: number; tax_lamports: number; trader_count: number };
