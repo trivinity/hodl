@@ -44,6 +44,7 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
       So the hook would only work while a token is still on our own curve, where we already see every trade.
       DECISION NEEDED: after graduation, either (1) the rules end and the token is a plain token on a DEX,
       or (2) tokens never leave our curve, so every rule stays enforceable. Pick before building graduation.
+- [ ] DECISION BEFORE MAINNET: tokens can be sent off our curve and sold in any third-party pool, which skips the hold-time tax and sell limits (nothing prevents it today; it needs someone to make a pool). Real fix: Token-2022 transfer hook that only allows transfers to/from our curve until graduation (Meteora revokes the hook at graduation, which matches our plan). Also fixes the flash-hold loophole. Cost: big rewrite; scanners may flag hook tokens as risky. Current stance: accept for devnet demo.
 - [ ] LOW  Creator sees every viewer's IP via the token image URL. Fix: image proxy or upload
 - [ ] LOW  npm audit: 22 findings inside Solana/Anchor libraries, no safe fix yet. Re-check on upgrades
 - [ ] LOW  CURVE_ACCOUNT_SIZE in web/src/lib/program.ts is hardcoded. Update if the Curve struct changes
