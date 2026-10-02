@@ -4,7 +4,7 @@ resolver = "2"
 
 [profile.release]
 # optimize for size: smaller programs cost less rent on chain
-opt-level = "s"
+opt-level = "z"
 overflow-checks = true
 lto = "fat"
 codegen-units = 1

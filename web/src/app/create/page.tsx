@@ -5,7 +5,7 @@ import { useAnchorWallet, useConnection } from "@solana/wallet-adapter-react";
 import { Keypair } from "@solana/web3.js";
 import { BN } from "@anchor-lang/core";
 import TaxMelt from "@/components/TaxMelt";
-import { walletProgram } from "@/lib/program";
+import { walletProgram, ata, curvePda } from "@/lib/program";
 import { duration } from "@/lib/format";
 import { friendlyError } from "@/lib/errors";
 import { useConfig } from "@/lib/useConfig";
@@ -87,7 +87,12 @@ export default function Create() {
           Math.round(reward * 100),
           Math.round(holderFeePct * 100)
         )
-        .accountsPartial({ creator: wallet.publicKey, mint: mint.publicKey })
+        .accountsPartial({
+          creator: wallet.publicKey,
+          mint: mint.publicKey,
+          // the curve's own token account, created inside the same transaction
+          vault: ata(mint.publicKey, curvePda(mint.publicKey), true),
+        })
         .signers([mint])
         .rpc();
 

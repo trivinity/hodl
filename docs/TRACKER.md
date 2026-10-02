@@ -34,7 +34,7 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
 - [x] Program size trimmed to 351,944 bytes (size-optimized build, manual upgrade-authority check)
 - [x] Admin page at /admin (not in the menu): pause button, platform fee for new tokens, treasury, two-step admin handover. Anyone can read it; only the admin wallet sees controls.
 - [x] Code is on GitHub (private): https://github.com/trivinity/hodl
-- [x] Tests: 24 on-chain (yarn test), 19 math (cargo test)
+- [x] Tests: 26 on-chain (yarn test), 19 math (cargo test)
 
 ## Open: security and correctness
 - [ ] LOW  Reward flash-hold: tokens moved out and back by plain transfer still earn while away.
@@ -44,7 +44,9 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
       So the hook would only work while a token is still on our own curve, where we already see every trade.
       DECISION NEEDED: after graduation, either (1) the rules end and the token is a plain token on a DEX,
       or (2) tokens never leave our curve, so every rule stays enforceable. Pick before building graduation.
-- [ ] DECISION BEFORE MAINNET: tokens can be sent off our curve and sold in any third-party pool, which skips the hold-time tax and sell limits (nothing prevents it today; it needs someone to make a pool). Real fix: Token-2022 transfer hook that only allows transfers to/from our curve until graduation (Meteora revokes the hook at graduation, which matches our plan). Also fixes the flash-hold loophole. Cost: big rewrite; scanners may flag hook tokens as risky. Current stance: accept for devnet demo.
+- [x] DONE: transfer hook. Until a token graduates it can only move by buying or selling on the curve: wallet to wallet and to other exchanges is refused (hodl_hook program, Token-2022). Also closes the flash-hold loophole. Name, symbol and image now live inside the mint (replaces Metaplex).
+      On devnet: hook program 13PKRkQAtxV92pJpM7fXAhxd5a1QGQPJ22o9FLLo7FNA, main program upgraded. Verified on devnet with test token 32jy7kUUKiRWuk8tLhLHrJQhc5w3B7NFNjfk5sJpKN29. Older devnet tokens (classic type) are hidden by the site.
+      Trade-offs: scanners and some wallets may flag hook tokens; holders cannot move tokens to a cold wallet until graduation. At graduation the hook must be switched off (curve is its authority; the instruction to do that is part of the graduation build, NOT built yet).
 - [ ] LOW  Creator sees every viewer's IP via the token image URL. Fix: image proxy or upload
 - [ ] LOW  npm audit: 22 findings inside Solana/Anchor libraries, no safe fix yet. Re-check on upgrades
 - [ ] LOW  CURVE_ACCOUNT_SIZE in web/src/lib/program.ts is hardcoded. Update if the Curve struct changes

@@ -92,7 +92,7 @@ export default function TokenPage({ params }: { params: Promise<{ mint: string }
           decaySecs={curve.decaySecs}
           heldSecs={held ?? undefined}
           scrub
-          caption={`Sell tax starts at ${curve.maxTaxBps / 100}% and reaches 0 after ${duration(curve.decaySecs)}. Each wallet can sell ${curve.holderSellBps / 100}% of its tokens per ${duration(curve.windowSecs)}. ${curve.rewardBps / 100}% of every sell tax is paid out to holders. Trade fee: ${curve.feeBps / 100}% to the creator${curve.holderFeeBps > 0 ? ` and ${curve.holderFeeBps / 100}% to holders` : ""}.`}
+          caption={`Sell tax starts at ${curve.maxTaxBps / 100}% and reaches 0 after ${duration(curve.decaySecs)}. Each wallet can sell ${curve.holderSellBps / 100}% of its tokens per ${duration(curve.windowSecs)}. ${curve.rewardBps / 100}% of every sell tax is paid out to holders. Trade fee: ${curve.feeBps / 100}% to the creator${curve.holderFeeBps > 0 ? ` and ${curve.holderFeeBps / 100}% to holders` : ""}. Until this token graduates it can only be bought and sold here: it cannot be sent to another wallet or traded on another exchange.`}
         />
 
         <h2 className="h2">Recent trades</h2>

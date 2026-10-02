@@ -1,6 +1,6 @@
 import * as anchor from "@anchor-lang/core";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
-import { getAssociatedTokenAddressSync } from "@solana/spl-token";
+import { getAssociatedTokenAddressSync, TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
 import idlJson from "../idl.json";
 import { dbConfigured, dbTrades } from "./db";
 
@@ -54,8 +54,9 @@ export function curvePda(mint: PublicKey) {
 export function positionPda(mint: PublicKey, owner: PublicKey) {
   return PublicKey.findProgramAddressSync([Buffer.from("position"), mint.toBuffer(), owner.toBuffer()], PROGRAM_ID)[0];
 }
-export function ata(mint: PublicKey, owner: PublicKey) {
-  return getAssociatedTokenAddressSync(mint, owner);
+/** every HODL token is a Token-2022 token, so its token accounts live under that program */
+export function ata(mint: PublicKey, owner: PublicKey, allowOwnerOffCurve = false) {
+  return getAssociatedTokenAddressSync(mint, owner, allowOwnerOffCurve, TOKEN_2022_PROGRAM_ID);
 }
 
 export type CurveView = {
@@ -134,7 +135,16 @@ export async function listCurves(program: anchor.Program<any>): Promise<CurveVie
       /* old layout, ignore */
     }
   }
-  return out;
+  // tokens made before the move to Token-2022 cannot trade with the current program: hide them
+  const keep: CurveView[] = [];
+  for (let i = 0; i < out.length; i += 100) {
+    const chunk = out.slice(i, i + 100);
+    const infos = await program.provider.connection.getMultipleAccountsInfo(chunk.map((c) => c.mint));
+    chunk.forEach((c, j) => {
+      if (infos[j]?.owner.equals(TOKEN_2022_PROGRAM_ID)) keep.push(c);
+    });
+  }
+  return keep;
 }
 
 export async function getCurve(program: anchor.Program<any>, mint: PublicKey): Promise<CurveView | null> {
@@ -183,6 +193,8 @@ export async function loadTrades(connection: Connection, program: anchor.Program
   if (mint && dbConfigured) {
     try {
       const rows = await dbTrades(mint.toBase58());
+      // an empty answer may just mean the indexer has not caught up (or points at another network): fall through to the chain
+      if (rows.length === 0) throw new Error("no indexed rows");
       return rows.map((r) => ({
         sig: r.sig,
         isBuy: r.is_buy,
