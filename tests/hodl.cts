@@ -1,7 +1,12 @@
 const anchor: any = require("@anchor-lang/core");
 const { BN } = anchor;
 const { Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } = require("@solana/web3.js");
-const { getAccount, getAssociatedTokenAddressSync } = require("@solana/spl-token");
+const {
+  getAccount,
+  getAssociatedTokenAddressSync,
+  createAssociatedTokenAccountIdempotentInstruction,
+  createTransferInstruction,
+} = require("@solana/spl-token");
 const { assert } = require("chai");
 const fs = require("fs");
 const path = require("path");
@@ -336,5 +341,93 @@ describe("HODL", () => {
       .rpc();
     const after: any = await (program.account as any).curve.fetch(c2);
     assert.isTrue(big(after.realSol) < big(full.realSol), "the sell should have paid out of the pool");
+  });
+
+  describe("wallet splitting", () => {
+    // a short tax fade (60s) so tokens can age inside a test
+    const m = Keypair.generate();
+    const w1 = Keypair.generate(); // aged holder
+    const w2 = Keypair.generate(); // fresh wallet that only receives transferred tokens
+    const w3 = Keypair.generate(); // split-at-buy wallets
+    const w4 = Keypair.generate();
+    const [c2] = PublicKey.findProgramAddressSync([Buffer.from("curve"), m.publicKey.toBuffer()], program.programId);
+    const ataOf = (w: any) => getAssociatedTokenAddressSync(m.publicKey, w.publicKey);
+    const balOf = async (w: any) => big((await getAccount(provider.connection, ataOf(w))).amount);
+    const buyM = (w: any, sol: number) =>
+      program.methods
+        .buy(new BN(sol * LAMPORTS_PER_SOL), new BN(0))
+        .accountsPartial({ buyer: w.publicKey, mint: m.publicKey })
+        .signers([w])
+        .rpc();
+    const sellM = async (w: any, tokens: bigint) => {
+      const sig = await program.methods
+        .sell(new BN(tokens.toString()), new BN(0))
+        .accountsPartial({ seller: w.publicKey, mint: m.publicKey })
+        .signers([w])
+        .rpc();
+      await provider.connection.confirmTransaction(sig, "confirmed");
+      const tx: any = await provider.connection.getTransaction(sig, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
+      const parser = new anchor.EventParser(program.programId, program.coder);
+      return [...parser.parseLogs(tx.meta.logMessages)].find((e: any) => e.name.toLowerCase() === "trade")!.data as any;
+    };
+    const chainTime = async () => (await provider.connection.getBlockTime(await provider.connection.getSlot("confirmed")))!;
+
+    before(async () => {
+      const tx = new Transaction();
+      for (const w of [w1, w2, w3, w4]) {
+        tx.add(SystemProgram.transfer({ fromPubkey: walletA.publicKey, toPubkey: w.publicKey, lamports: 3 * LAMPORTS_PER_SOL }));
+      }
+      await provider.sendAndConfirm(tx);
+      await program.methods
+        .createCurve("Aged", "AGED", "", 100, 3000, new BN(60), 5000, new BN(3600), 0, 0)
+        .accountsPartial({ creator: walletA.publicKey, mint: m.publicKey })
+        .signers([m])
+        .rpc();
+    });
+
+    it("tokens sent to a fresh wallet pay the full starting tax, even when the sender's tokens are aged", async () => {
+      await buyM(w1, 1);
+      const boughtAt = await chainTime();
+      while ((await chainTime()) - boughtAt < 62) await new Promise((r) => setTimeout(r, 1000));
+
+      // the sender's own tokens have aged past the 60s fade: no tax
+      const w1bal = await balOf(w1);
+      const aged = await sellM(w1, w1bal / 10n);
+      assert.equal(big(aged.tax), 0n, "aged tokens should pay no tax");
+
+      // move half to a brand new wallet that has never bought anything
+      const move = big((await balOf(w1)) / 2n);
+      const t = new Transaction().add(
+        createAssociatedTokenAccountIdempotentInstruction(w1.publicKey, ataOf(w2), w2.publicKey, m.publicKey),
+        createTransferInstruction(ataOf(w1), ataOf(w2), w1.publicKey, move)
+      );
+      await provider.sendAndConfirm(t, [w1]);
+
+      // the fresh wallet sells 40% of what it received: full 30% tax
+      const w2bal = await balOf(w2);
+      assert.equal(w2bal, move);
+      const sellAmt = (w2bal * 40n) / 100n;
+      const st: any = await (program.account as any).curve.fetch(c2);
+      const gross = sellGross(big(st.virtualSol), big(st.virtualTokens), sellAmt);
+      const ev = await sellM(w2, sellAmt);
+      assert.equal(big(ev.tax), (gross * 3000n) / 10000n, "transferred tokens must pay exactly the starting tax");
+    });
+
+    it("splitting at buy does not raise the share a person can sell", async () => {
+      await buyM(w3, 1);
+      await buyM(w4, 1);
+      const b3 = await balOf(w3);
+      const b4 = await balOf(w4);
+      // each wallet is capped at 50% of its own balance, so no wallet can go past that
+      await expectError(sellM(w3, (b3 * 51n) / 100n), /HolderLimitExceeded|already sold/i);
+      await expectError(sellM(w4, (b4 * 51n) / 100n), /HolderLimitExceeded|already sold/i);
+      const s3 = b3 / 2n;
+      const s4 = b4 / 2n;
+      await sellM(w3, s3);
+      await sellM(w4, s4);
+      // together they sold exactly half of what they hold together: the same as one wallet would
+      const total = b3 + b4;
+      assert.isTrue((s3 + s4) * 2n <= total && (s3 + s4) * 2n >= total - 2n, "split wallets sold more than half in total");
+    });
   });
 });

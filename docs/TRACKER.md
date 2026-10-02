@@ -18,10 +18,10 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
 - [x] Site reads chain time instead of the browser clock
 - [x] Calm minimal restyle (Inter + Geist Mono, dark mode)
 - [x] Security headers, https-only token images
-- [x] Tests: 14 on-chain (yarn test), 18 math (cargo test)
+- [x] Wallet splitting is not a loophole: limit is a % of each wallet's balance, and tokens moved to a fresh wallet pay the full starting tax (both covered by tests)
+- [x] Tests: 16 on-chain (yarn test), 18 math (cargo test)
 
 ## Open: security and correctness
-- [ ] MED  Many wallets beat the per-wallet sell limit (a whale can split up). Decide: accept, or add a cost
 - [ ] MED  Timed token moves can still game rewards (flash-hold). Real fix: Token-2022 transfer hook
 - [ ] MED  No test for the "moved tokens stop earning" rule
 - [ ] LOW  Creator sees every viewer's IP via the token image URL. Fix: image proxy or upload
