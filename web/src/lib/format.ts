@@ -24,6 +24,19 @@ export function price(p: number): string {
   return p.toFixed(decimals);
 }
 
+/** price of 1M tokens in SOL: readable, because a single token costs a tiny fraction of a SOL */
+export function perMillion(solPerToken: number): string {
+  return price(solPerToken * 1e6);
+}
+
+/** market cap style numbers for axes: short but never rounded to nothing */
+export function capLabel(v: number): string {
+  if (v >= 1000) return compact(v, 1);
+  if (v >= 100) return v.toFixed(0);
+  if (v >= 1) return v.toFixed(2);
+  return v.toFixed(3);
+}
+
 export function duration(secs: number): string {
   secs = Math.max(0, Math.round(secs));
   const d = Math.floor(secs / 86400);

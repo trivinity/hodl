@@ -3,7 +3,7 @@ import Avatar from "@/components/Avatar";
 import MiniMelt from "@/components/MiniMelt";
 import { CurveView } from "@/lib/program";
 import { marketCapSol, priceSol, progress } from "@/lib/curve";
-import { compact, duration, price, sol } from "@/lib/format";
+import { compact, duration, perMillion, sol } from "@/lib/format";
 
 const pct = (bps: number) => (bps / 100).toFixed(bps % 100 === 0 ? 0 : 1);
 
@@ -47,7 +47,7 @@ export default function TokenCard({ c }: { c: CurveView }) {
           <span style={{ width: `${Math.max(2, p * 100)}%` }} />
         </span>
         <span className="muted">
-          {Math.round(p * 100)}% sold · {price(priceSol(c.vs, c.vt))} each
+          {Math.round(p * 100)}% sold · {perMillion(priceSol(c.vs, c.vt))} SOL per 1M
         </span>
       </div>
     </Link>

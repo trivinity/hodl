@@ -4,12 +4,13 @@ import { useConnection } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
 import Avatar from "@/components/Avatar";
 import TaxMelt from "@/components/TaxMelt";
+import PriceChart from "@/components/PriceChart";
 import TradePanel from "@/components/TradePanel";
 import GraduatePanel from "@/components/GraduatePanel";
 import { useConfig } from "@/lib/useConfig";
-import { CurveView, TradeView, getCurve, loadTrades, readProgram, curvePda } from "@/lib/program";
+import { CurveView, PricePoint, TradeView, getCurve, loadPoolCap, loadPriceHistory, loadTrades, readProgram, curvePda } from "@/lib/program";
 import { marketCapSol, priceSol, progress, INIT_REAL_TOKENS } from "@/lib/curve";
-import { ago, compact, duration, price, short, sol, tokens } from "@/lib/format";
+import { ago, capLabel, duration, perMillion, short, sol, tokens } from "@/lib/format";
 
 export default function TokenPage({ params }: { params: Promise<{ mint: string }> }) {
   const { mint: mintStr } = use(params);
@@ -19,6 +20,8 @@ export default function TokenPage({ params }: { params: Promise<{ mint: string }
   const [missing, setMissing] = useState(false);
   const [trades, setTrades] = useState<TradeView[]>([]);
   const [held, setHeld] = useState<number | null>(null);
+  const [history, setHistory] = useState<PricePoint[]>([]);
+  const [poolCap, setPoolCap] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -31,6 +34,8 @@ export default function TokenPage({ params }: { params: Promise<{ mint: string }
       }
       setCurve(c);
       loadTrades(connection, program, curvePda(mint), mint).then(setTrades).catch(() => {});
+      loadPriceHistory(connection, program, curvePda(mint), mint).then(setHistory).catch(() => {});
+      if (c.graduatedStage >= 2) loadPoolCap(connection, c.pool).then(setPoolCap).catch(() => {});
     } catch {
       setMissing(true);
     }
@@ -67,11 +72,13 @@ export default function TokenPage({ params }: { params: Promise<{ mint: string }
         <dl className="stats">
           <div>
             <dt>{graduated ? "Price at graduation" : "Price"}</dt>
-            <dd>{price(priceSol(curve.vs, curve.vt))} SOL</dd>
+            <dd title={`${priceSol(curve.vs, curve.vt)} SOL per token`}>
+              {perMillion(priceSol(curve.vs, curve.vt))} SOL<small>per 1M tokens</small>
+            </dd>
           </div>
           <div>
-            <dt>{graduated ? "Cap at graduation" : "Market cap"}</dt>
-            <dd>{compact(marketCapSol(curve.vs, curve.vt), 1)} SOL</dd>
+            <dt>{graduated && poolCap ? "Market cap" : graduated ? "Cap at graduation" : "Market cap"}</dt>
+            <dd>{capLabel(graduated && poolCap ? poolCap : marketCapSol(curve.vs, curve.vt))} SOL{graduated && poolCap ? <small>live, from the pool</small> : null}</dd>
           </div>
           <div>
             <dt>In the pool</dt>
@@ -89,6 +96,13 @@ export default function TokenPage({ params }: { params: Promise<{ mint: string }
         <p className="muted bar-note">
           {graduated ? "The curve sold out and the token moved to its Meteora pool." : `${Math.round(p * 100)}% of the curve sold. Trading ends when it is full.`}
         </p>
+
+        <h2 className="h2">Price</h2>
+        <PriceChart
+          points={history}
+          live={graduated ? poolCap : marketCapSol(curve.vs, curve.vt)}
+          note={graduated ? "Trades on the curve, then the latest price read from the Meteora pool. Individual pool trades are not shown." : undefined}
+        />
 
         <h2 className="h2">{graduated ? "The rules this token had on the curve" : "The rules for this token"}</h2>
         <TaxMelt

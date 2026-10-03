@@ -2,7 +2,7 @@ import * as anchor from "@anchor-lang/core";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync, TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
 import idlJson from "../idl.json";
-import { dbActivity, dbConfigured, dbTrades } from "./db";
+import { dbActivity, dbConfigured, dbPriceHistory, dbTrades } from "./db";
 
 export const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || "http://127.0.0.1:8899";
 export const CLUSTER_LABEL = process.env.NEXT_PUBLIC_CLUSTER_LABEL || "localnet";
@@ -321,4 +321,51 @@ export async function listPositions(program: anchor.Program<any>, owner: PublicK
     rewardDebt: b(a.account.rewardDebt),
     pendingRewards: b(a.account.pendingRewards),
   }));
+}
+
+/** one point of the price chart: market cap in SOL at a moment (unix seconds) */
+export type PricePoint = { t: number; cap: number; isBuy?: boolean };
+
+const capOf = (vs: bigint, vt: bigint) => (vt === 0n ? 0 : (Number(vs) / 1e9 / (Number(vt) / 1e6)) * 1_000_000_000);
+
+/** every trade's market cap, oldest first: from the database if it has rows, else the newest trades read from the chain */
+export async function loadPriceHistory(connection: Connection, program: anchor.Program<any>, curve: PublicKey, mint: PublicKey): Promise<PricePoint[]> {
+  if (dbConfigured) {
+    try {
+      const rows = await dbPriceHistory(mint.toBase58());
+      if (rows.length === 0) throw new Error("no indexed rows");
+      return rows.map((r) => ({ t: Math.floor(new Date(r.ts).getTime() / 1000), cap: capOf(BigInt(r.virtual_sol), BigInt(r.virtual_tokens)), isBuy: r.is_buy }));
+    } catch {
+      /* fall through to the chain */
+    }
+  }
+  const sigs = await connection.getSignaturesForAddress(curve, { limit: 40 });
+  const parser = new anchor.EventParser(program.programId, program.coder);
+  const out: PricePoint[] = [];
+  for (const s of sigs) {
+    if (s.err) continue;
+    const tx = await connection.getTransaction(s.signature, { maxSupportedTransactionVersion: 0, commitment: "confirmed" });
+    const logs = tx?.meta?.logMessages;
+    if (!logs) continue;
+    for (const ev of parser.parseLogs(logs)) {
+      if (ev.name.toLowerCase() !== "trade") continue;
+      const d: any = ev.data;
+      out.push({ t: Number(d.ts), cap: capOf(b(d.virtualSol), b(d.virtualTokens)), isBuy: d.isBuy });
+    }
+  }
+  return out.sort((a, c) => a.t - c.t);
+}
+
+/**
+ * Market cap in SOL of a graduated token, read from its Meteora pool. The pool keeps its price as a
+ * square root in Q64.64 form at byte 456 of the account (checked against the pool's own layout), token A is always the HODL token.
+ */
+export async function loadPoolCap(connection: Connection, pool: PublicKey): Promise<number | null> {
+  const info = await connection.getAccountInfo(pool, "confirmed");
+  if (!info || info.data.length < 472) return null;
+  let sp = 0n;
+  for (let i = 15; i >= 0; i--) sp = (sp << 8n) | BigInt(info.data[456 + i]);
+  const root = Number(sp) / 2 ** 64;
+  const lamportsPerBaseUnit = root * root;
+  return ((lamportsPerBaseUnit * 1e6) / 1e9) * 1_000_000_000; // SOL per whole token (6 decimals) times 1B supply
 }

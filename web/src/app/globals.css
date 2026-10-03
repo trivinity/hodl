@@ -1390,3 +1390,26 @@ input:focus {
     grid-column: 1 / -1;
   }
 }
+
+/* price chart */
+.pchart {
+  margin: 0;
+}
+.pchart-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.pchart-top .seg button {
+  padding: 6px 12px;
+}
+.stats dd small {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--muted);
+  letter-spacing: 0;
+  margin-top: 2px;
+}

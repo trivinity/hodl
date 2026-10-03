@@ -74,7 +74,9 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
       Devnet program is now 464,440 bytes (extended). Deployer key has about 3.3 SOL.
       NOT verified: how Phantom and scanners show graduated tokens; the fee fading from 30% to about 1% over 7 days (only checked at the start); a full-size (30 SOL virtual, about 85 SOL raised) graduation on devnet (needs about 90 devnet SOL); size reduction ideas.
       Notes: needs a test chain with Meteora's program (see tests/graduation.cts); `anchor build -p hold_launchpad` builds the main program (a plain `anchor build` also builds the hook but prints a harmless 'IDL doesn't exist' for it).
-- [ ] Price chart
+- [x] Price chart (token page): market cap per trade from the indexed trades (or the chain if no database), 1h / 24h / All, hover to read, plus a live point. After graduation the live point is read from the Meteora pool (price at byte 456 of the pool account). Individual pool swaps are NOT indexed, so the chart has a gap between graduation and now.
+- [x] Readable price: shown per 1M tokens (a single token costs a tiny fraction of a SOL); full price on hover.
+- [x] Logo: melt-line badge + wordmark (header, favicon, share image). Concepts in docs/brand.
 
 - [x] Supabase project "hodl" created (free tier, us-east-1, ref puamkthzhgibhzfjrktl) and the schema applied. Security advisor: clean (one INFO about indexer_state having no policies, which is intended).
       Verified with the public key: reads work, inserts refused, deletes change nothing, indexer_state hidden. Public URL + anon key are in web/.env.local.
