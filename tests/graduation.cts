@@ -5,6 +5,7 @@ const spl = require("@solana/spl-token");
 const { assert } = require("chai");
 const fs = require("fs");
 const path = require("path");
+const { indexOnce, memoryStore } = require("../web/src/lib/indexer.ts");
 
 // Runs a whole token graduation against Meteora's real DAMM v2 program. That program must be on the test chain:
 //   solana-test-validator --reset --url devnet --clone-upgradeable-program cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG
@@ -305,5 +306,20 @@ describe("graduation to a Meteora pool", function () {
       // no rewards were ever generated for this holder in this scenario (nobody sold on the curve): that is fine, it just must not be blocked by graduation
       assert.match(String(e) + JSON.stringify(e?.logs ?? ""), /NothingToClaim|No fees to claim/i);
     }
+  });
+
+  it("the indexer records the graduation and the pool fee payouts", async () => {
+    const store = memoryStore();
+    await indexOnce({ connection: c, program, store });
+    const m = mint.publicKey.toBase58();
+    const grads = store.rows.graduations.filter((g: any) => g.mint === m);
+    assert.equal(grads.length, 1, "one graduation row");
+    assert.equal(grads[0].pool, pool.toBase58());
+    const cv: any = await (program.account as any).curve.fetch(curve);
+    assert.equal(BigInt(grads[0].lp_sol), big(cv.lpSol));
+    assert.equal(BigInt(grads[0].lp_tokens), big(cv.lpTokens));
+    const fees = store.rows.poolFees.filter((f: any) => f.mint === m);
+    assert.equal(fees.length, 2, "two pool fee payouts");
+    assert.isTrue(fees.every((f: any) => f.amount > 0));
   });
 });

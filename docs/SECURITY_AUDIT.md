@@ -17,7 +17,7 @@ Everything below was read or tested on 2026-10-02 against commit `e86c5a8` plus 
 - `cargo audit` was not available, so Rust dependencies were not scanned for known advisories
 - No test of how Phantom, other wallets, explorers or token scanners treat hook tokens
 - No load or abuse testing, no penetration test of Vercel or Supabase
-- The graduation step does not exist yet, so it was not reviewed
+- Graduation (added later the same day) was NOT part of this review; it is tested but not yet re-audited
 
 ## Findings
 

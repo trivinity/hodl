@@ -34,7 +34,7 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
 - [x] Program size trimmed to 351,944 bytes (size-optimized build, manual upgrade-authority check)
 - [x] Admin page at /admin (not in the menu): pause button, platform fee for new tokens, treasury, two-step admin handover. Anyone can read it; only the admin wallet sees controls.
 - [x] Code is on GitHub (private): https://github.com/trivinity/hodl
-- [x] Tests: 28 on-chain (yarn test), 19 math (cargo test)
+- [x] Tests: 35 on-chain (yarn test; graduation tests need Meteora cloned onto the chain), 25 unit (cargo test)
 
 ## Open: security and correctness
 - [x] CLOSED by the hook (tokens cannot be moved off the curve now): Reward flash-hold: tokens moved out and back by plain transfer still earn while away.
@@ -50,7 +50,7 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
 - [ ] SECURITY AUDIT (2026-10-02) done, see docs/SECURITY_AUDIT.md. Open items: rotate leaked secrets (HIGH), add a report-only content security policy (MEDIUM), token name impersonation warning (LOW), test hook tokens in real wallets and scanners (MEDIUM; Phantom on devnet CONFIRMED by the owner on 2026-10-02: a transfer is refused; other wallets and scanners not tested), install cargo-audit and scan Rust dependencies, back up the devnet deploy key (LOW).
 - [ ] LOW  Creator sees every viewer's IP via the token image URL. Fix: image proxy or upload
 - [ ] LOW  npm audit: 22 findings inside Solana/Anchor libraries, no safe fix yet. Re-check on upgrades
-- [ ] LOW  CURVE_ACCOUNT_SIZE in web/src/lib/program.ts is hardcoded. Update if the Curve struct changes
+- [ ] LOW  CURVE_ACCOUNT_SIZE in web/src/lib/program.ts is hardcoded (now 469). Update if the Curve struct changes. Curves created before graduation (older size) are hidden by the site.
 - [ ] HIGH (before mainnet) Professional audit, legal review, multisig upgrade authority
 
 - [x] (obsolete now that tokens cannot be moved) UX warning about claiming before moving tokens
@@ -68,7 +68,11 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
       Step 1 switches the transfer hook off for good and sets the funds aside (0.05 SOL setup cost comes out of the SOL raised); step 2 creates the Meteora pool at the price the funds imply (fading fee 30% to about 1% over 7 days, fees collected in SOL); step 3 locks the liquidity permanently.
       Safety checks tested: wrong opening price rejected, too little liquidity rejected (cannot keep funds back), steps cannot be repeated or skipped, curve trading stops, holders can transfer freely afterwards, pool fees can only go to the treasury.
       Decisions made by the owner: pool fees go to the treasury; setup cost taken from the SOL raised.
-      STILL TO DO: website (graduate button, graduated state, link to trade on the pool), indexer events, devnet upgrade (program is now 463 KB: costs about 2.4 SOL of temporary buffer plus about 0.5 SOL to extend, the devnet deploy key has about 1.8 SOL), size reduction ideas, real-wallet test of the 3 steps.
+      Website done: Graduate button with 3-step progress (resumes if someone else ran step 1), Graduated / Ready-to-graduate chips on cards, pool link on the token page.
+      Indexer done: Graduated and PoolFeesClaimed events are saved (migration 0003 applied to the hodl project; tables graduations and pool_fee_claims; platform_stats has graduated_count and pool_fees_lamports). Tested against a real graduation.
+      VERIFIED ON DEVNET (2026-10-02, with Meteora's real devnet program): a temporary test build (1 SOL starting virtual reserve) filled a curve at 2.83 SOL, all 3 steps ran through the website function, then a 0.4 SOL swap on the pool and claim_pool_fees paid 0.096 SOL to the treasury; a claim naming a different treasury was refused. Test token 5ySxgjgFiQJh55qNMeEPrpUD2ocRSGZF1jdQKrjd54Dq, pool 7HaEUvjnuv8D8PEHc8Wq5ixEKuKueLj4Tb8PaQ4ToqmB. The real build was put back afterwards (bytes compared). The test pool's 2.78 SOL is locked for good.
+      Devnet program is now 464,440 bytes (extended). Deployer key has about 3.3 SOL.
+      NOT verified: how Phantom and scanners show graduated tokens; the fee fading from 30% to about 1% over 7 days (only checked at the start); a full-size (30 SOL virtual, about 85 SOL raised) graduation on devnet (needs about 90 devnet SOL); size reduction ideas.
       Notes: needs a test chain with Meteora's program (see tests/graduation.cts); `anchor build -p hold_launchpad` builds the main program (a plain `anchor build` also builds the hook but prints a harmless 'IDL doesn't exist' for it).
 - [ ] Price chart
 
@@ -79,7 +83,7 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
 - [ ] Old paused Supabase project "supabase-charcoal-house" left untouched (not ours to change).
 - [ ] Disk is at 98% full: the local test ledger at ~/tl/test-ledger is 3 GB; delete it when the validator is stopped.
 - [ ] Indexer caveats: first run reads at most 5000 transactions back (reports gap:true if more). Vercel Hobby cron runs once a day only; for every-minute runs use Vercel Pro or a free GitHub Actions schedule.
-- [ ] Devnet program has 3.7 KB of headroom (max-len 335000, program 331256). The CurveCreated event is NOT deployed to devnet yet; it needs an upgrade (about 0.001 SOL in fees, refundable buffer rent).
+- [x] Devnet program was extended to 464,440 bytes for graduation. It matches the current code, events included.
 
 - Local demo data: `node scripts/seed-local.cjs` fills a local chain with example tokens and trading (refuses non-local networks).
 
@@ -87,6 +91,7 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
 - Run the admin tool against devnet: `RPC_URL=https://api.devnet.solana.com WALLET=<devnet deploy key file> node scripts/admin.cjs show`.
 - Devnet: set `NEXT_PUBLIC_RPC_URL=https://api.devnet.solana.com` and `NEXT_PUBLIC_CLUSTER_LABEL=devnet` (the public RPC is rate limited; use a free provider key for sharing).
 - Devnet SOL is scarce: the public faucet is rate limited. Do not run the full test suite on devnet (it needs about 20 SOL).
-- Local run: validator needs the Metaplex program copied from devnet: `solana-test-validator --reset --url devnet --clone-upgradeable-program metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s` (run it in a terminal tab), then `cd web && npm run dev`.
+- Local run: validator needs Meteora's DAMM program copied from devnet: `solana-test-validator --reset --limit-ledger-size 10000 --url devnet --clone-upgradeable-program cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG` (run it in a terminal tab), then `cd web && npm run dev`.
 - Never commit: `*-keypair.json`, `.env.local`, licensed fonts.
+- Temporary small-curve test build for devnet: change INIT_VIRTUAL_SOL in programs/hold_launchpad/src/math.rs to 1_000_000_000, build, upgrade devnet, test, then upgrade back and compare bytes. Never commit the changed constant.
 - Tests: `ANCHOR_PROVIDER_URL=http://localhost:8899 ANCHOR_WALLET=~/.config/solana/id.json yarn test` and `cargo test`.

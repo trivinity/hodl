@@ -39,7 +39,12 @@ export type TradeRow = {
   slot: number;
 };
 export type ClaimRow = { sig: string; idx: number; mint: string; claimer: string; amount: number; ts: string; slot: number };
-export type Rows = { curves: CurveRow[]; trades: TradeRow[]; claims: ClaimRow[] };
+/** A token that finished graduating: the Meteora pool it now trades on and what went into it. */
+export type GraduationRow = { mint: string; pool: string; lp_sol: number; lp_tokens: number; sig: string; ts: string; slot: number };
+/** Pool trading fees paid out to the treasury. */
+export type PoolFeeRow = { sig: string; idx: number; mint: string; amount: number; ts: string; slot: number };
+export type Rows = { curves: CurveRow[]; trades: TradeRow[]; claims: ClaimRow[]; graduations: GraduationRow[]; poolFees: PoolFeeRow[] };
+const emptyRows = (): Rows => ({ curves: [], trades: [], claims: [], graduations: [], poolFees: [] });
 
 /** Where the indexer keeps its rows and its place in the chain. Supabase in production, memory in tests. */
 export interface Store {
@@ -53,6 +58,8 @@ export type IndexResult = {
   curves: number;
   trades: number;
   claims: number;
+  graduations: number;
+  poolFees: number;
   /** true if the run could not reach the saved cursor: some older transactions may have been skipped */
   gap: boolean;
   cursor: string | null;
@@ -64,7 +71,7 @@ const iso = (unix: number) => new Date(unix * 1000).toISOString();
 
 /** Turn the events of one transaction into rows. Pure, so it is easy to test. */
 export function eventsToRows(sig: string, slot: number, blockTime: number | null, events: { name: string; data: any }[]): Rows {
-  const rows: Rows = { curves: [], trades: [], claims: [] };
+  const rows = emptyRows();
   events.forEach((e, idx) => {
     const d = e.data;
     const name = e.name.toLowerCase();
@@ -114,6 +121,18 @@ export function eventsToRows(sig: string, slot: number, blockTime: number | null
         ts: iso(blockTime ?? Math.floor(Date.now() / 1000)),
         slot,
       });
+    } else if (name === "graduated") {
+      rows.graduations.push({
+        mint: d.mint.toBase58(),
+        pool: d.pool.toBase58(),
+        lp_sol: num(d.lpSol),
+        lp_tokens: num(d.lpTokens),
+        sig,
+        ts: iso(blockTime ?? Math.floor(Date.now() / 1000)),
+        slot,
+      });
+    } else if (name === "poolfeesclaimed") {
+      rows.poolFees.push({ sig, idx, mint: d.mint.toBase58(), amount: num(d.amount), ts: iso(blockTime ?? Math.floor(Date.now() / 1000)), slot });
     }
   });
   return rows;
@@ -141,7 +160,7 @@ export async function indexOnce(opts: { connection: Connection; program: anchor.
   const { sigs, gap } = await collectNewSignatures(connection, program.programId, cursor);
   const oldestFirst = sigs.reverse().filter((s) => !s.err);
 
-  const rows: Rows = { curves: [], trades: [], claims: [] };
+  const rows = emptyRows();
   let transactions = 0;
   let last: { sig: string; slot: number } | null = null;
   let stop = false;
@@ -161,6 +180,8 @@ export async function indexOnce(opts: { connection: Connection; program: anchor.
       rows.curves.push(...r.curves);
       rows.trades.push(...r.trades);
       rows.claims.push(...r.claims);
+      rows.graduations.push(...r.graduations);
+      rows.poolFees.push(...r.poolFees);
       transactions++;
       last = { sig: slice[j].signature, slot: slice[j].slot };
     }
@@ -173,6 +194,8 @@ export async function indexOnce(opts: { connection: Connection; program: anchor.
     curves: rows.curves.length,
     trades: rows.trades.length,
     claims: rows.claims.length,
+    graduations: rows.graduations.length,
+    poolFees: rows.poolFees.length,
     gap,
     cursor: last?.sig ?? cursor,
   };
@@ -193,6 +216,8 @@ export function supabaseStore(db: any): Store {
       if (rows.curves.length) must(await db.from("curves").upsert(rows.curves, { onConflict: "mint" }), "save curves");
       if (rows.trades.length) must(await db.from("trades").upsert(rows.trades, { onConflict: "sig,idx" }), "save trades");
       if (rows.claims.length) must(await db.from("claims").upsert(rows.claims, { onConflict: "sig,idx" }), "save claims");
+      if (rows.graduations.length) must(await db.from("graduations").upsert(rows.graduations, { onConflict: "mint" }), "save graduations");
+      if (rows.poolFees.length) must(await db.from("pool_fee_claims").upsert(rows.poolFees, { onConflict: "sig,idx" }), "save pool fee claims");
       if (cursor) {
         must(
           await db.from("indexer_state").upsert({ id: "main", last_sig: cursor.sig, last_slot: cursor.slot, updated_at: new Date().toISOString() }, { onConflict: "id" }),
@@ -206,7 +231,7 @@ export function supabaseStore(db: any): Store {
 /** In-memory store for tests and dry runs. */
 export function memoryStore(): Store & { rows: Rows; cursor: string | null } {
   const s = {
-    rows: { curves: [], trades: [], claims: [] } as Rows,
+    rows: emptyRows(),
     cursor: null as string | null,
     async getCursor() {
       return s.cursor;
@@ -215,6 +240,8 @@ export function memoryStore(): Store & { rows: Rows; cursor: string | null } {
       s.rows.curves.push(...rows.curves);
       s.rows.trades.push(...rows.trades);
       s.rows.claims.push(...rows.claims);
+      s.rows.graduations.push(...rows.graduations);
+      s.rows.poolFees.push(...rows.poolFees);
       if (c) s.cursor = c.sig;
     },
   };
