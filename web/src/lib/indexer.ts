@@ -2,7 +2,8 @@
 // re-read hundreds of transactions on every page load.
 // Imports are kept light and relative so tests can run this file directly.
 import * as anchor from "@anchor-lang/core";
-import type { Connection, PublicKey } from "@solana/web3.js";
+import { PublicKey, type Connection } from "@solana/web3.js";
+import { swapsInTransaction } from "./poolSwaps.ts";
 
 export type CurveRow = {
   mint: string;
@@ -43,13 +44,18 @@ export type ClaimRow = { sig: string; idx: number; mint: string; claimer: string
 export type GraduationRow = { mint: string; pool: string; lp_sol: number; lp_tokens: number; sig: string; ts: string; slot: number };
 /** Pool trading fees paid out to the treasury. */
 export type PoolFeeRow = { sig: string; idx: number; mint: string; amount: number; ts: string; slot: number };
-export type Rows = { curves: CurveRow[]; trades: TradeRow[]; claims: ClaimRow[]; graduations: GraduationRow[]; poolFees: PoolFeeRow[] };
-const emptyRows = (): Rows => ({ curves: [], trades: [], claims: [], graduations: [], poolFees: [] });
+/** A swap on the Meteora pool of a graduated token. cap_sol is the market cap right after it. */
+export type PoolTradeRow = { sig: string; idx: number; mint: string; pool: string; trader: string; is_buy: boolean; sol: number; tokens: number; cap_sol: number; ts: string; slot: number };
+export type Rows = { curves: CurveRow[]; trades: TradeRow[]; claims: ClaimRow[]; graduations: GraduationRow[]; poolFees: PoolFeeRow[]; poolTrades: PoolTradeRow[] };
+const emptyRows = (): Rows => ({ curves: [], trades: [], claims: [], graduations: [], poolFees: [], poolTrades: [] });
 
 /** Where the indexer keeps its rows and its place in the chain. Supabase in production, memory in tests. */
 export interface Store {
-  getCursor(): Promise<string | null>;
-  save(rows: Rows, cursor: { sig: string; slot: number } | null): Promise<void>;
+  /** `id` picks which place in the chain: "main" for the HODL program, "pool:<address>" for a Meteora pool */
+  getCursor(id?: string): Promise<string | null>;
+  save(rows: Rows, cursor: { sig: string; slot: number } | null, id?: string): Promise<void>;
+  /** every graduated token and its pool, so their swaps can be read too */
+  pools(): Promise<{ mint: string; pool: string }[]>;
 }
 
 export type IndexResult = {
@@ -60,6 +66,7 @@ export type IndexResult = {
   claims: number;
   graduations: number;
   poolFees: number;
+  poolTrades: number;
   /** true if the run could not reach the saved cursor: some older transactions may have been skipped */
   gap: boolean;
   cursor: string | null;
@@ -188,7 +195,15 @@ export async function indexOnce(opts: { connection: Connection; program: anchor.
   }
 
   await store.save(rows, last);
+
+  // swaps on the Meteora pools of graduated tokens
+  let poolTrades = 0;
+  for (const { mint, pool } of (await store.pools()).slice(0, MAX_POOLS_PER_RUN)) {
+    poolTrades += await indexPool({ connection, store, mint, pool, batch });
+  }
+
   return {
+    poolTrades,
     signatures: oldestFirst.length,
     transactions,
     curves: rows.curves.length,
@@ -201,18 +216,68 @@ export async function indexOnce(opts: { connection: Connection; program: anchor.
   };
 }
 
+const MAX_POOLS_PER_RUN = 25;
+const DAMM_ID = new PublicKey("cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG");
+
+/** Read the new swaps of one pool and save them. Returns how many swaps were found. */
+export async function indexPool(opts: { connection: Connection; store: Store; mint: string; pool: string; batch?: number }): Promise<number> {
+  const { connection, store, mint, pool } = opts;
+  const batch = opts.batch ?? 5;
+  const id = `pool:${pool}`;
+  const { sigs } = await collectNewSignatures(connection, new PublicKey(pool), await store.getCursor(id), 10);
+  const oldestFirst = sigs.reverse().filter((x) => !x.err);
+  const rows = emptyRows();
+  let last: { sig: string; slot: number } | null = null;
+  let stop = false;
+  for (let i = 0; i < oldestFirst.length && !stop; i += batch) {
+    const slice = oldestFirst.slice(i, i + batch);
+    const txs = await Promise.all(slice.map((x) => connection.getTransaction(x.signature, { commitment: "confirmed", maxSupportedTransactionVersion: 0 })));
+    for (let j = 0; j < slice.length; j++) {
+      const tx = txs[j];
+      if (!tx?.meta) {
+        stop = true; // not readable yet: the next run picks it up
+        break;
+      }
+      swapsInTransaction(tx, pool, mint).forEach(({ swap, trader }, idx) => {
+        rows.poolTrades.push({
+          sig: slice[j].signature,
+          idx,
+          mint,
+          pool,
+          trader,
+          is_buy: swap.isBuy,
+          sol: num(swap.sol),
+          tokens: num(swap.tokens),
+          cap_sol: swap.capSol,
+          ts: iso(tx.blockTime ?? Math.floor(Date.now() / 1000)),
+          slot: slice[j].slot,
+        });
+      });
+      last = { sig: slice[j].signature, slot: slice[j].slot };
+    }
+  }
+  if (rows.poolTrades.length || last) await store.save(rows, last, id);
+  return rows.poolTrades.length;
+}
+
 /** Store backed by a Supabase client (server side, service role key). Upserts make every run safe to repeat. */
 export function supabaseStore(db: any): Store {
   const must = (res: { error: { message: string } | null }, what: string) => {
     if (res.error) throw new Error(`${what}: ${res.error.message}`);
   };
   return {
-    async getCursor() {
-      const res = await db.from("indexer_state").select("last_sig").eq("id", "main").maybeSingle();
+    async getCursor(id = "main") {
+      const res = await db.from("indexer_state").select("last_sig").eq("id", id).maybeSingle();
       must(res, "read cursor");
       return res.data?.last_sig ?? null;
     },
-    async save(rows, cursor) {
+    async pools() {
+      const res = await db.from("graduations").select("mint,pool");
+      must(res, "read pools");
+      return (res.data ?? []) as { mint: string; pool: string }[];
+    },
+    async save(rows, cursor, id = "main") {
+      if (rows.poolTrades.length) must(await db.from("pool_trades").upsert(rows.poolTrades, { onConflict: "sig,idx" }), "save pool trades");
       if (rows.curves.length) must(await db.from("curves").upsert(rows.curves, { onConflict: "mint" }), "save curves");
       if (rows.trades.length) must(await db.from("trades").upsert(rows.trades, { onConflict: "sig,idx" }), "save trades");
       if (rows.claims.length) must(await db.from("claims").upsert(rows.claims, { onConflict: "sig,idx" }), "save claims");
@@ -220,7 +285,7 @@ export function supabaseStore(db: any): Store {
       if (rows.poolFees.length) must(await db.from("pool_fee_claims").upsert(rows.poolFees, { onConflict: "sig,idx" }), "save pool fee claims");
       if (cursor) {
         must(
-          await db.from("indexer_state").upsert({ id: "main", last_sig: cursor.sig, last_slot: cursor.slot, updated_at: new Date().toISOString() }, { onConflict: "id" }),
+          await db.from("indexer_state").upsert({ id, last_sig: cursor.sig, last_slot: cursor.slot, updated_at: new Date().toISOString() }, { onConflict: "id" }),
           "save cursor"
         );
       }
@@ -233,10 +298,19 @@ export function memoryStore(): Store & { rows: Rows; cursor: string | null } {
   const s = {
     rows: emptyRows(),
     cursor: null as string | null,
-    async getCursor() {
-      return s.cursor;
+    cursors: {} as Record<string, string>,
+    async getCursor(id = "main") {
+      return id === "main" ? s.cursor : s.cursors[id] ?? null;
     },
-    async save(rows: Rows, c: { sig: string; slot: number } | null) {
+    async pools() {
+      return s.rows.graduations.map((g) => ({ mint: g.mint, pool: g.pool }));
+    },
+    async save(rows: Rows, c: { sig: string; slot: number } | null, id = "main") {
+      s.rows.poolTrades.push(...rows.poolTrades);
+      if (id !== "main") {
+        if (c) s.cursors[id] = c.sig;
+        return;
+      }
       s.rows.curves.push(...rows.curves);
       s.rows.trades.push(...rows.trades);
       s.rows.claims.push(...rows.claims);

@@ -2,7 +2,8 @@ import * as anchor from "@anchor-lang/core";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync, TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
 import idlJson from "../idl.json";
-import { dbActivity, dbConfigured, dbPriceHistory, dbTrades } from "./db";
+import { dbActivity, dbConfigured, dbPoolTrades, dbPriceHistory, dbTrades } from "./db";
+import { swapsInTransaction } from "./poolSwaps";
 
 export const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || "http://127.0.0.1:8899";
 export const CLUSTER_LABEL = process.env.NEXT_PUBLIC_CLUSTER_LABEL || "localnet";
@@ -196,9 +197,16 @@ export async function getTokenBalance(connection: Connection, mint: PublicKey, o
   }
 }
 
-export type TradeView = { sig: string; isBuy: boolean; trader: string; sol: bigint; tokens: bigint; tax: bigint; rewards: bigint; ts: number };
+export type TradeView = { sig: string; isBuy: boolean; trader: string; sol: bigint; tokens: bigint; tax: bigint; rewards: bigint; ts: number; /** set for swaps on the Meteora pool after graduation */ pool?: boolean };
 
-export async function loadTrades(connection: Connection, program: anchor.Program<any>, curve: PublicKey, mint?: PublicKey): Promise<TradeView[]> {
+export async function loadTrades(connection: Connection, program: anchor.Program<any>, curve: PublicKey, mint?: PublicKey, pool?: PublicKey): Promise<TradeView[]> {
+  const curveTrades = await loadCurveTrades(connection, program, curve, mint);
+  if (!pool || !mint) return curveTrades;
+  const poolTrades = await loadPoolTrades(connection, mint, pool).catch(() => []);
+  return [...poolTrades.map((t) => ({ sig: t.sig, isBuy: t.isBuy, trader: t.trader, sol: t.sol, tokens: t.tokens, tax: 0n, rewards: 0n, ts: t.ts, pool: true })), ...curveTrades].sort((a, b) => b.ts - a.ts).slice(0, 25);
+}
+
+async function loadCurveTrades(connection: Connection, program: anchor.Program<any>, curve: PublicKey, mint?: PublicKey): Promise<TradeView[]> {
   // fast path: the indexed copy in Supabase, if it is set up
   if (mint && dbConfigured) {
     try {
@@ -329,7 +337,15 @@ export type PricePoint = { t: number; cap: number; isBuy?: boolean; sol?: number
 const capOf = (vs: bigint, vt: bigint) => (vt === 0n ? 0 : (Number(vs) / 1e9 / (Number(vt) / 1e6)) * 1_000_000_000);
 
 /** every trade's market cap, oldest first: from the database if it has rows, else the newest trades read from the chain */
-export async function loadPriceHistory(connection: Connection, program: anchor.Program<any>, curve: PublicKey, mint: PublicKey): Promise<PricePoint[]> {
+export async function loadPriceHistory(connection: Connection, program: anchor.Program<any>, curve: PublicKey, mint: PublicKey, pool?: PublicKey): Promise<PricePoint[]> {
+  const onCurve = await loadCurvePriceHistory(connection, program, curve, mint);
+  if (!pool) return onCurve;
+  const swaps = await loadPoolTrades(connection, mint, pool, 1000).catch(() => []);
+  const onPool: PricePoint[] = swaps.map((t) => ({ t: t.ts, cap: t.cap, isBuy: t.isBuy, sol: Number(t.sol) / 1e9, trader: t.trader }));
+  return [...onCurve, ...onPool].sort((a, b) => a.t - b.t);
+}
+
+async function loadCurvePriceHistory(connection: Connection, program: anchor.Program<any>, curve: PublicKey, mint: PublicKey): Promise<PricePoint[]> {
   if (dbConfigured) {
     try {
       const rows = await dbPriceHistory(mint.toBase58());
@@ -386,4 +402,30 @@ export async function listHolders(program: anchor.Program<any>, mint: PublicKey)
     }))
     .filter((r: HolderRow) => r.tracked > 0n || r.pending > 0n)
     .sort((x: HolderRow, y: HolderRow) => (y.tracked > x.tracked ? 1 : y.tracked < x.tracked ? -1 : 0));
+}
+
+export type PoolTradeView = { sig: string; isBuy: boolean; trader: string; sol: bigint; tokens: bigint; ts: number; cap: number };
+
+/** swaps on a graduated token's Meteora pool, newest first: from the database if it has them, else straight from the chain */
+export async function loadPoolTrades(connection: Connection, mint: PublicKey, pool: PublicKey, limit = 25): Promise<PoolTradeView[]> {
+  if (dbConfigured) {
+    try {
+      const rows = await dbPoolTrades(mint.toBase58(), limit);
+      if (rows.length === 0) throw new Error("no indexed rows");
+      return rows.map((r) => ({ sig: r.sig, isBuy: r.is_buy, trader: r.trader, sol: BigInt(r.sol), tokens: BigInt(r.tokens), ts: Math.floor(new Date(r.ts).getTime() / 1000), cap: r.cap_sol }));
+    } catch {
+      /* fall through to the chain */
+    }
+  }
+  const sigs = await connection.getSignaturesForAddress(pool, { limit: Math.min(limit, 40) }, "confirmed");
+  const out: PoolTradeView[] = [];
+  for (const s of sigs) {
+    if (s.err) continue;
+    const tx = await connection.getTransaction(s.signature, { maxSupportedTransactionVersion: 0, commitment: "confirmed" });
+    if (!tx) continue;
+    for (const { swap, trader } of swapsInTransaction(tx, pool.toBase58(), mint.toBase58())) {
+      out.push({ sig: s.signature, isBuy: swap.isBuy, trader, sol: swap.sol, tokens: swap.tokens, ts: tx.blockTime ?? Math.floor(Date.now() / 1000), cap: swap.capSol });
+    }
+  }
+  return out;
 }

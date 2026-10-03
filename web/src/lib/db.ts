@@ -49,3 +49,9 @@ export type DbPricePoint = { ts: string; is_buy: boolean; virtual_sol: number; v
 export function dbPriceHistory(mint: string, limit = 1000) {
   return rest<DbPricePoint[]>(`trades?select=ts,is_buy,virtual_sol,virtual_tokens,sol,trader&mint=eq.${encodeURIComponent(mint)}&order=slot.asc,idx.asc&limit=${limit}`);
 }
+
+export type DbPoolTrade = { sig: string; is_buy: boolean; trader: string; sol: number; tokens: number; cap_sol: number; ts: string };
+/** newest first */
+export function dbPoolTrades(mint: string, limit = 1000) {
+  return rest<DbPoolTrade[]>(`pool_trades?select=sig,is_buy,trader,sol,tokens,cap_sol,ts&mint=eq.${encodeURIComponent(mint)}&order=slot.desc,idx.desc&limit=${limit}`);
+}

@@ -40,8 +40,8 @@ export default function TokenPage({ params }: { params: Promise<{ mint: string }
         return;
       }
       setCurve(c);
-      loadTrades(connection, program, curvePda(mint), mint).then(setTrades).catch(() => {});
-      loadPriceHistory(connection, program, curvePda(mint), mint).then(setHistory).catch(() => {});
+      loadTrades(connection, program, curvePda(mint), mint, c.graduatedStage >= 2 ? c.pool : undefined).then(setTrades).catch(() => {});
+      loadPriceHistory(connection, program, curvePda(mint), mint, c.graduatedStage >= 2 ? c.pool : undefined).then(setHistory).catch(() => {});
       if (c.graduatedStage >= 2) loadPoolCap(connection, c.pool).then(setPoolCap).catch(() => {});
     } catch {
       setMissing(true);
@@ -115,7 +115,7 @@ export default function TokenPage({ params }: { params: Promise<{ mint: string }
         <PriceChart
           points={history}
           live={graduated ? poolCap : marketCapSol(curve.vs, curve.vt)}
-          note={graduated ? "Trades on the curve, then the latest price read from the Meteora pool. Individual pool trades are not shown." : undefined}
+          note={graduated ? "Trades on the curve, then swaps on the Meteora pool." : undefined}
         />
 
         <div className="tabs-row">
@@ -149,7 +149,10 @@ export default function TokenPage({ params }: { params: Promise<{ mint: string }
               {trades.map((t) => (
                 <tr key={t.sig}>
                   <td>{short(t.trader)}</td>
-                  <td className={t.isBuy ? "buy" : "sell"}>{t.isBuy ? "Buy" : "Sell"}</td>
+                  <td className={t.isBuy ? "buy" : "sell"}>
+                    {t.isBuy ? "Buy" : "Sell"}
+                    {t.pool && <span className="chip-info" title="Traded on the Meteora pool"> pool</span>}
+                  </td>
                   <td className="num">{sol(t.sol, 3)}</td>
                   <td className="num">{tokens(t.tokens, 1)}</td>
                   <td className="num">{t.tax > 0n ? `${sol(t.tax, 4)}` : "0"}</td>

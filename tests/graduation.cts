@@ -295,6 +295,16 @@ describe("graduation to a Meteora pool", function () {
     const before2 = BigInt(await c.getBalance(treasury, "confirmed"));
     await claimIx(treasury).rpc();
     assert.isTrue(BigInt(await c.getBalance(treasury, "confirmed")) > before2, "second payout arrived");
+
+    // and the trader sells some of the tokens back into the pool (token A to SOL)
+    await damm.methods
+      .swap2({ amount0: new BN(1_000_000_000), amount1: new BN(0), swapMode: 0 })
+      .accountsPartial({
+        pool, inputTokenAccount: tOut, outputTokenAccount: tIn, tokenAVault: vaultA, tokenBVault: vaultB,
+        tokenAMint: mint.publicKey, tokenBMint: WSOL, payer: trader.publicKey, tokenAProgram: T22, tokenBProgram: CLASSIC, referralTokenAccount: null,
+      })
+      .signers([trader])
+      .rpc();
   });
 
   it("holders can still claim the rewards they earned on the curve after graduation", async () => {
@@ -321,5 +331,21 @@ describe("graduation to a Meteora pool", function () {
     const fees = store.rows.poolFees.filter((f: any) => f.mint === m);
     assert.equal(fees.length, 2, "two pool fee payouts");
     assert.isTrue(fees.every((f: any) => f.amount > 0));
+
+    // the two swaps the trader made on Meteora's pool are in there too, oldest first, with sensible numbers
+    const swaps = store.rows.poolTrades.filter((t: any) => t.mint === m);
+    assert.equal(swaps.length, 3, "three pool swaps: two buys and a sell");
+    assert.isTrue(swaps.every((t: any) => t.pool === pool.toBase58() && t.trader === trader.publicKey.toBase58()));
+    assert.isTrue(swaps[0].is_buy && swaps[1].is_buy && !swaps[2].is_buy);
+    assert.equal(swaps[2].tokens, 1_000_000_000, "the sell moved exactly the tokens sold");
+    assert.isAbove(swaps[2].sol, 0);
+    assert.isBelow(swaps[2].cap_sol, swaps[1].cap_sol, "selling pushes the market cap down");
+    assert.equal(swaps[0].sol, LAMPORTS_PER_SOL);
+    assert.equal(swaps[1].sol, LAMPORTS_PER_SOL / 2);
+    assert.isTrue(swaps[0].tokens > 0 && swaps[1].tokens > 0);
+    assert.isAbove(swaps[1].cap_sol, swaps[0].cap_sol, "buying again pushes the market cap up");
+    // reading the same chain again finds nothing new
+    const again = await indexOnce({ connection: c, program, store });
+    assert.equal(again.poolTrades, 0);
   });
 });
