@@ -3,11 +3,14 @@ import Avatar from "@/components/Avatar";
 import MiniMelt from "@/components/MiniMelt";
 import { CurveView } from "@/lib/program";
 import { marketCapSol, priceSol, progress } from "@/lib/curve";
-import { compact, duration, perMillion, sol } from "@/lib/format";
+import { capIn, duration, perMillion, sol, usdLabel } from "@/lib/format";
+import { useSolUsd, useUnit } from "@/lib/useUnit";
 
 const pct = (bps: number) => (bps / 100).toFixed(bps % 100 === 0 ? 0 : 1);
 
 export default function TokenCard({ c }: { c: CurveView }) {
+  const [unit] = useUnit();
+  const solUsd = useSolUsd();
   const p = progress(c.realTokens);
   const waiting = c.rewardPool;
   return (
@@ -19,7 +22,7 @@ export default function TokenCard({ c }: { c: CurveView }) {
           <span className="muted">{c.symbol}</span>
         </span>
         <span className="tcard-cap">
-          <strong>{compact(marketCapSol(c.vs, c.vt), 1)} SOL</strong>
+          <strong>{capIn(marketCapSol(c.vs, c.vt), unit, solUsd)}</strong>
           <span className="muted">market cap</span>
         </span>
       </div>
@@ -47,7 +50,7 @@ export default function TokenCard({ c }: { c: CurveView }) {
           <span style={{ width: `${Math.max(2, p * 100)}%` }} />
         </span>
         <span className="muted">
-          {Math.round(p * 100)}% sold · {perMillion(priceSol(c.vs, c.vt))} SOL per 1M
+          {Math.round(p * 100)}% sold · {unit === "USD" && solUsd ? usdLabel(priceSol(c.vs, c.vt) * 1e6 * solUsd) : `${perMillion(priceSol(c.vs, c.vt))} SOL`} per 1M
         </span>
       </div>
     </Link>

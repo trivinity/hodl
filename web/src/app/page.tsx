@@ -1,4 +1,5 @@
 "use client";
+import UnitToggle from "@/components/UnitToggle";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useConnection } from "@solana/wallet-adapter-react";
@@ -104,6 +105,7 @@ export default function Home() {
       <section id="tokens" className="list-wrap">
         <div className="list-head">
           <h2>Tokens</h2>
+          <UnitToggle />
           <div className="seg" role="tablist" aria-label="Sort tokens">
             {(
               [

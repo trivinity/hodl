@@ -67,3 +67,16 @@ export function hue(key: string): number {
   for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) % 360;
   return h;
 }
+
+/** dollars, short: $4.2K, $1.3M */
+export function usdLabel(v: number): string {
+  if (v >= 1000) return "$" + compact(v, 1);
+  if (v >= 100) return "$" + v.toFixed(0);
+  if (v >= 1) return "$" + v.toFixed(2);
+  return "$" + v.toFixed(3);
+}
+
+/** a market cap given in SOL, shown in the chosen unit (falls back to SOL while the dollar price is unknown) */
+export function capIn(capSol: number, unit: "SOL" | "USD", solUsd: number | null): string {
+  return unit === "USD" && solUsd ? usdLabel(capSol * solUsd) : `${capLabel(capSol)} SOL`;
+}

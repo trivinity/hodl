@@ -10,12 +10,15 @@ import GraduatePanel from "@/components/GraduatePanel";
 import { useConfig } from "@/lib/useConfig";
 import { CurveView, PricePoint, TradeView, getCurve, loadPoolCap, loadPriceHistory, loadTrades, readProgram, curvePda } from "@/lib/program";
 import { marketCapSol, priceSol, progress, INIT_REAL_TOKENS } from "@/lib/curve";
-import { ago, capLabel, duration, perMillion, short, sol, tokens } from "@/lib/format";
+import { ago, capIn, duration, perMillion, short, sol, tokens, usdLabel } from "@/lib/format";
+import { useSolUsd, useUnit } from "@/lib/useUnit";
 
 export default function TokenPage({ params }: { params: Promise<{ mint: string }> }) {
   const { mint: mintStr } = use(params);
   const { connection } = useConnection();
   const config = useConfig();
+  const [unit] = useUnit();
+  const solUsd = useSolUsd();
   const [curve, setCurve] = useState<CurveView | null>(null);
   const [missing, setMissing] = useState(false);
   const [trades, setTrades] = useState<TradeView[]>([]);
@@ -73,12 +76,16 @@ export default function TokenPage({ params }: { params: Promise<{ mint: string }
           <div>
             <dt>{graduated ? "Price at graduation" : "Price"}</dt>
             <dd title={`${priceSol(curve.vs, curve.vt)} SOL per token`}>
-              {perMillion(priceSol(curve.vs, curve.vt))} SOL<small>per 1M tokens</small>
+              {unit === "USD" && solUsd ? usdLabel(priceSol(curve.vs, curve.vt) * 1e6 * solUsd) : `${perMillion(priceSol(curve.vs, curve.vt))} SOL`}
+              <small>per 1M tokens</small>
             </dd>
           </div>
           <div>
             <dt>{graduated && poolCap ? "Market cap" : graduated ? "Cap at graduation" : "Market cap"}</dt>
-            <dd>{capLabel(graduated && poolCap ? poolCap : marketCapSol(curve.vs, curve.vt))} SOL{graduated && poolCap ? <small>live, from the pool</small> : null}</dd>
+            <dd>
+              {capIn(graduated && poolCap ? poolCap : marketCapSol(curve.vs, curve.vt), unit, solUsd)}
+              {graduated && poolCap ? <small>live, from the pool</small> : null}
+            </dd>
           </div>
           <div>
             <dt>In the pool</dt>
@@ -102,15 +109,6 @@ export default function TokenPage({ params }: { params: Promise<{ mint: string }
           points={history}
           live={graduated ? poolCap : marketCapSol(curve.vs, curve.vt)}
           note={graduated ? "Trades on the curve, then the latest price read from the Meteora pool. Individual pool trades are not shown." : undefined}
-        />
-
-        <h2 className="h2">{graduated ? "The rules this token had on the curve" : "The rules for this token"}</h2>
-        <TaxMelt
-          maxBps={curve.maxTaxBps}
-          decaySecs={curve.decaySecs}
-          heldSecs={held ?? undefined}
-          scrub
-          caption={`Sell tax starts at ${curve.maxTaxBps / 100}% and reaches 0 after ${duration(curve.decaySecs)}. Each wallet can sell ${curve.holderSellBps / 100}% of its tokens per ${duration(curve.windowSecs)}. ${curve.rewardBps / 100}% of every sell tax is paid out to holders. Trade fee: ${curve.feeBps / 100}% to the creator${curve.holderFeeBps > 0 ? ` and ${curve.holderFeeBps / 100}% to holders` : ""}. ${graduated ? "These rules ended when the token graduated: it now trades freely on its Meteora pool." : "Until this token graduates it can only be bought and sold here: it cannot be sent to another wallet or traded on another exchange."}`}
         />
 
         <h2 className="h2">Recent trades</h2>
@@ -142,6 +140,16 @@ export default function TokenPage({ params }: { params: Promise<{ mint: string }
             </tbody>
           </table>
         )}
+
+        <h2 className="h2">{graduated ? "The rules this token had on the curve" : "The rules for this token"}</h2>
+        <TaxMelt
+          maxBps={curve.maxTaxBps}
+          decaySecs={curve.decaySecs}
+          heldSecs={held ?? undefined}
+          scrub
+          caption={`Sell tax starts at ${curve.maxTaxBps / 100}% and reaches 0 after ${duration(curve.decaySecs)}. Each wallet can sell ${curve.holderSellBps / 100}% of its tokens per ${duration(curve.windowSecs)}. ${curve.rewardBps / 100}% of every sell tax is paid out to holders. Trade fee: ${curve.feeBps / 100}% to the creator${curve.holderFeeBps > 0 ? ` and ${curve.holderFeeBps / 100}% to holders` : ""}. ${graduated ? "These rules ended when the token graduated: it now trades freely on its Meteora pool." : "Until this token graduates it can only be bought and sold here: it cannot be sent to another wallet or traded on another exchange."}`}
+        />
+
       </div>
 
       <aside className="token-side">

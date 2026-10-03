@@ -1417,3 +1417,16 @@ input:focus {
   opacity: 0.4;
   cursor: not-allowed;
 }
+.pchart-bar {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 6px 0 8px;
+}
+.pchart-bar .seg button {
+  padding: 6px 12px;
+}
+.ohlc {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+}
