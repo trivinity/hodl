@@ -1,6 +1,6 @@
 // The three steps that turn a full token into a Meteora trading pool. Anyone can run them.
 // Kept free of app imports so the same code can be run from a script and from the website.
-import { ComputeBudgetProgram, Keypair, PublicKey } from "@solana/web3.js";
+import { ComputeBudgetProgram, Keypair, PublicKey, Transaction } from "@solana/web3.js";
 import { NATIVE_MINT, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { BN } from "@anchor-lang/core";
 
@@ -68,39 +68,55 @@ export function graduationAddresses(programId: PublicKey, mint: PublicKey, posit
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** run whatever steps are left, one transaction each. `program` is the HODL program connected to the caller's wallet. */
+// what the curve itself owns when it is full: the supply it did not sell (1B minus the 793.1M on the curve)
+const LEFTOVER_TOKENS = 206_900_000_000_000n;
+const SETUP_COST = 50_000_000n;
+
+/**
+ * Graduate a full token. Everything runs in ONE transaction (switch the hook off, open the Meteora pool, lock the liquidity):
+ * the program refuses step 1 on its own, because otherwise anyone could open a rival pool in between and trap the SOL.
+ * `program` is the HODL program connected to the caller's wallet.
+ */
 export async function runGraduation(program: any, mint: PublicKey, onStep?: (step: GradStep, done: number, total: number) => void): Promise<void> {
   const caller: PublicKey = program.provider.wallet.publicKey;
-  const stageOf = async (): Promise<number> => {
-    const c = await program.account.curve.fetch(graduationAddresses(program.programId, mint, PublicKey.default).curve);
-    return c.graduatedStage as number;
-  };
-  // reads can lag one moment behind a transaction that just confirmed: wait until the stage moves on
-  const waitForStage = async (atLeast: number) => {
-    for (let i = 0; i < 40; i++) {
-      if ((await stageOf()) >= atLeast) return;
-      await sleep(250);
-    }
-    throw new Error("The network is slow to show the last step. Try again in a moment.");
-  };
+  const base = graduationAddresses(program.programId, mint, PublicKey.default);
+  const fetchCurve = async () => program.account.curve.fetch(base.curve);
 
-  const start = await stageOf();
-  const steps = (["prepare", "pool", "lock"] as GradStep[]).slice(start);
-  let done = 0;
-  for (const step of steps) {
-    onStep?.(step, done, steps.length);
-    if (step === "prepare") {
-      const a = graduationAddresses(program.programId, mint, PublicKey.default);
-      await program.methods
-        .graduatePrepare()
-        .accountsPartial({ caller, mint, vault: a.vault, grad: a.grad, gradToken: a.gradToken, gradWsol: a.gradWsol })
-        .rpc();
-      await waitForStage(1);
-    } else if (step === "pool") {
-      const curve = await program.account.curve.fetch(graduationAddresses(program.programId, mint, PublicKey.default).curve);
-      const { sqrtPrice, liquidity } = poolNumbers(BigInt(curve.lpTokens.toString()), BigInt(curve.lpSol.toString()));
-      const nft = Keypair.generate();
-      const a = graduationAddresses(program.programId, mint, nft.publicKey);
+  const curve = await fetchCurve();
+  const stage = curve.graduatedStage as number;
+  if (stage >= 3) return;
+  onStep?.(stage === 0 ? "prepare" : stage === 1 ? "pool" : "lock", 0, 1);
+
+  const ixs: any[] = [ComputeBudgetProgram.setComputeUnitLimit({ units: 1_000_000 })];
+  const signers: Keypair[] = [];
+  let nftMint: PublicKey = curve.positionNftMint as PublicKey;
+
+  if (stage <= 1) {
+    // the amounts the program will set aside, known up front: the SOL raised minus the setup cost, and the tokens the curve owns
+    let lpTokens: bigint;
+    let lpSol: bigint;
+    if (stage === 0) {
+      const vault = BigInt((await program.provider.connection.getTokenAccountBalance(base.vault, "confirmed")).value.amount);
+      const owned = LEFTOVER_TOKENS + BigInt(curve.realTokens.toString());
+      lpTokens = vault < owned ? vault : owned;
+      lpSol = BigInt(curve.realSol.toString()) - SETUP_COST;
+      ixs.push(
+        await program.methods
+          .graduatePrepare()
+          .accountsPartial({ caller, mint, vault: base.vault, grad: base.grad, gradToken: base.gradToken, gradWsol: base.gradWsol })
+          .instruction()
+      );
+    } else {
+      // an older half-finished graduation (from before step 1 had to travel with step 2)
+      lpTokens = BigInt(curve.lpTokens.toString());
+      lpSol = BigInt(curve.lpSol.toString());
+    }
+    const { sqrtPrice, liquidity } = poolNumbers(lpTokens, lpSol);
+    const nft = Keypair.generate();
+    signers.push(nft);
+    nftMint = nft.publicKey;
+    const a = graduationAddresses(program.programId, mint, nft.publicKey);
+    ixs.push(
       await program.methods
         .graduateCreatePool(new BN(sqrtPrice.toString()), new BN(liquidity.toString()))
         .accountsPartial({
@@ -117,20 +133,25 @@ export async function runGraduation(program: any, mint: PublicKey, onStep?: (ste
           tokenBVault: a.vaultB,
           eventAuthority: a.eventAuthority,
         })
-        .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 600000 })])
-        .signers([nft])
-        .rpc();
-      await waitForStage(2);
-    } else {
-      const curve = await program.account.curve.fetch(graduationAddresses(program.programId, mint, PublicKey.default).curve);
-      const a = graduationAddresses(program.programId, mint, curve.positionNftMint as PublicKey);
-      await program.methods
-        .graduateLock()
-        .accountsPartial({ caller, mint, grad: a.grad, pool: curve.pool, position: a.position, positionNftAccount: a.positionNftAccount, eventAuthority: a.eventAuthority })
-        .rpc();
-      await waitForStage(3);
-    }
-    done += 1;
+        .instruction()
+    );
   }
-  onStep?.("lock", steps.length, steps.length);
+
+  const a = graduationAddresses(program.programId, mint, nftMint);
+  ixs.push(
+    await program.methods
+      .graduateLock()
+      .accountsPartial({ caller, mint, grad: a.grad, pool: a.pool, position: a.position, positionNftAccount: a.positionNftAccount, eventAuthority: a.eventAuthority })
+      .instruction()
+  );
+
+  const tx = new Transaction().add(...ixs);
+  await program.provider.sendAndConfirm(tx, signers);
+
+  // reads can lag one moment behind a transaction that just confirmed: wait until the stage shows
+  for (let i = 0; i < 40; i++) {
+    if (((await fetchCurve()).graduatedStage as number) >= 3) break;
+    await sleep(250);
+  }
+  onStep?.("lock", 1, 1);
 }

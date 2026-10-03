@@ -69,7 +69,7 @@ pub fn lock_data(liquidity: u128) -> Vec<u8> {
     d
 }
 
-/// Does the opening price the caller supplied match the real amounts going into the pool, within 0.5%?
+/// Does the opening price the caller supplied match the real amounts going into the pool, within 0.1%?
 /// The pool opens at price = SOL / tokens, and the price is passed to Meteora as sqrt(price) * 2^64.
 /// This stops whoever triggers graduation from opening the pool at a bad price and trading against it.
 pub fn price_matches(lp_sol: u64, lp_tokens: u64, sqrt_price: u128) -> bool {
@@ -86,7 +86,40 @@ pub fn price_matches(lp_sol: u64, lp_tokens: u64, sqrt_price: u128) -> bool {
         None => return false,
     };
     let diff = if actual > expected { actual - expected } else { expected - actual };
-    diff <= expected / 200
+    diff <= expected / 1000
+}
+
+/// Reads the instructions sysvar (the list of every instruction in the running transaction) and says whether a LATER instruction
+/// is a call to `program_id` with discriminator `disc` whose third account is `mint` (that is where `graduate_create_pool` takes the mint).
+/// Layout: u16 count, u16 offset per instruction, then each instruction (u16 account count, [1 flag byte + 32 byte key] per account,
+/// 32 byte program id, u16 data length, data), and the index of the running instruction as the last two bytes.
+pub fn pool_step_follows(sysvar: &[u8], program_id: &Pubkey, disc: &[u8], mint: &Pubkey) -> bool {
+    fn u16_at(d: &[u8], o: usize) -> Option<usize> {
+        let b = d.get(o..o.checked_add(2)?)?;
+        Some(u16::from_le_bytes([b[0], b[1]]) as usize)
+    }
+    fn check(d: &[u8], program_id: &Pubkey, disc: &[u8], mint: &Pubkey) -> Option<bool> {
+        let count = u16_at(d, 0)?;
+        let current = u16_at(d, d.len().checked_sub(2)?)?;
+        for i in current.checked_add(1)?..count {
+            let start = u16_at(d, 2usize.checked_add(i.checked_mul(2)?)?)?;
+            let accounts = u16_at(d, start)?;
+            let accounts_at = start.checked_add(2)?;
+            let program_at = accounts_at.checked_add(accounts.checked_mul(33)?)?;
+            let prog = d.get(program_at..program_at.checked_add(32)?)?;
+            let data_len = u16_at(d, program_at.checked_add(32)?)?;
+            let data_at = program_at.checked_add(34)?;
+            let data = d.get(data_at..data_at.checked_add(data_len)?)?;
+            if prog == program_id.as_ref() && data.len() >= disc.len() && &data[..disc.len()] == disc && accounts >= 3 {
+                let key_at = accounts_at.checked_add(2 * 33 + 1)?;
+                if d.get(key_at..key_at.checked_add(32)?)? == mint.as_ref() {
+                    return Some(true);
+                }
+            }
+        }
+        Some(false)
+    }
+    check(sysvar, program_id, disc, mint).unwrap_or(false)
 }
 
 /// Did the pool take (nearly) everything we put in? `before` and `after` are the balances around the pool creation.
@@ -134,10 +167,57 @@ mod tests {
         assert!(!price_matches(sol, tokens, sp / 2), "half the price must fail");
         assert!(!price_matches(sol, tokens, sp * 2), "double must fail");
         assert!(!price_matches(sol, tokens, sp + sp / 50), "2% off must fail");
-        assert!(price_matches(sol, tokens, sp + sp / 1000), "0.1% off is fine");
+        assert!(!price_matches(sol, tokens, sp + sp / 1000), "0.2% off in price must fail");
+        assert!(price_matches(sol, tokens, sp + sp / 5000), "0.04% off is fine");
         assert!(!price_matches(0, tokens, sp));
         assert!(!price_matches(sol, 0, sp));
         assert!(!price_matches(sol, tokens, u128::MAX), "huge price must not overflow");
+    }
+
+    #[test]
+    fn step_two_must_follow_in_the_same_transaction() {
+        use anchor_lang::solana_program::sysvar::instructions::{construct_instructions_data, BorrowedAccountMeta, BorrowedInstruction};
+        let program = Pubkey::new_unique();
+        let other = Pubkey::new_unique();
+        let (mint, other_mint, caller, curve) = (Pubkey::new_unique(), Pubkey::new_unique(), Pubkey::new_unique(), Pubkey::new_unique());
+        let disc = [1u8, 2, 3, 4, 5, 6, 7, 8];
+        // (program, mint passed as the third account, data)
+        type Spec = (Pubkey, Pubkey, Vec<u8>);
+        let make = |ixs: &[Spec], current: u16| {
+            let list: Vec<BorrowedInstruction> = ixs
+                .iter()
+                .map(|(p, m, d)| BorrowedInstruction {
+                    program_id: p,
+                    accounts: vec![
+                        BorrowedAccountMeta { pubkey: &caller, is_signer: true, is_writable: true },
+                        BorrowedAccountMeta { pubkey: &curve, is_signer: false, is_writable: true },
+                        BorrowedAccountMeta { pubkey: m, is_signer: false, is_writable: false },
+                    ],
+                    data: d,
+                })
+                .collect();
+            let mut data = construct_instructions_data(&list);
+            let n = data.len();
+            data[n - 2..].copy_from_slice(&current.to_le_bytes());
+            data
+        };
+        let step1: Spec = (program, mint, vec![9u8; 8]);
+        let step2: Spec = (program, mint, disc.to_vec());
+        // step 1 at index 0, step 2 right after: fine
+        assert!(pool_step_follows(&make(&[step1.clone(), step2.clone()], 0), &program, &disc, &mint));
+        // with another instruction in between: fine
+        assert!(pool_step_follows(&make(&[step1.clone(), (other, mint, vec![]), step2.clone()], 0), &program, &disc, &mint));
+        // step 1 alone: refused
+        assert!(!pool_step_follows(&make(&[step1.clone()], 0), &program, &disc, &mint));
+        // step 2 BEFORE step 1 does not count
+        assert!(!pool_step_follows(&make(&[step2.clone(), step1.clone()], 1), &program, &disc, &mint));
+        // step 2 for another token does not count
+        assert!(!pool_step_follows(&make(&[step1.clone(), (program, other_mint, disc.to_vec())], 0), &program, &disc, &mint));
+        // the same shape sent to a different program does not count
+        assert!(!pool_step_follows(&make(&[step1.clone(), (other, mint, disc.to_vec())], 0), &program, &disc, &mint));
+        // garbage never panics and never says yes
+        assert!(!pool_step_follows(&[], &program, &disc, &mint));
+        assert!(!pool_step_follows(&[1, 0, 9, 9, 0, 0], &program, &disc, &mint));
     }
 
     #[test]

@@ -7,8 +7,8 @@ import { friendlyError } from "@/lib/errors";
 import { short } from "@/lib/format";
 
 const LABEL: Record<GradStep, string> = {
-  prepare: "Switching off the transfer lock and setting the funds aside…",
-  pool: "Creating the trading pool…",
+  prepare: "Switching off the transfer lock, opening the pool and locking the liquidity (one approval)…",
+  pool: "Opening the pool and locking the liquidity (one approval)…",
   lock: "Locking the liquidity for good…",
 };
 
@@ -50,7 +50,7 @@ export default function GraduatePanel({ curve, onDone }: { curve: CurveView; onD
     setError(null);
     try {
       await runGraduation(walletProgram(connection, wallet as any), curve.mint, (s, done, total) =>
-        setProgress(done >= total ? "Done." : `Step ${done + 1} of ${total}: ${LABEL[s]}`)
+        setProgress(done >= total ? "Done." : LABEL[s])
       );
       onDone();
     } catch (e) {
@@ -72,7 +72,7 @@ export default function GraduatePanel({ curve, onDone }: { curve: CurveView; onD
       </p>
       <ul className="muted" style={{ paddingLeft: 18, margin: "10px 0 16px" }}>
         <li>The transfer lock switches off, so tokens can move freely.</li>
-        <li>About 0.05 SOL of the SOL raised pays for the pool’s setup. You pay only network fees and about 0.005 SOL for two token accounts.</li>
+        <li>It is a single wallet approval. About 0.05 SOL of the SOL raised pays for the pool’s setup; you pay only network fees and about 0.005 SOL for two token accounts.</li>
         <li>Pool trading fees start at 30% and fade to about 1% over a week. They go to the platform treasury.</li>
       </ul>
       <button className="btn btn-primary btn-block" disabled={!wallet || busy || !step} onClick={go}>

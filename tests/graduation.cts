@@ -170,6 +170,17 @@ describe("graduation to a Meteora pool", function () {
     );
   });
 
+  // steps 1, 2 and 3 as instructions of one transaction (step 1 is refused on its own: see tests/graduation_attacks.cts)
+  const graduateTx = async (instructions: any[], signers: any[] = [nft]) => {
+    const tx = new Transaction().add(ComputeBudgetProgram.setComputeUnitLimit({ units: 1_000_000 }), ...instructions);
+    return provider.sendAndConfirm(tx, signers);
+  };
+  const poolIx = (sp: bigint, L: bigint) =>
+    program.methods
+      .graduateCreatePool(new BN(sp.toString()), new BN(L.toString()))
+      .accountsPartial({ caller: payer.publicKey, mint: mint.publicKey, grad, gradToken, gradWsol, positionNftMint: nft.publicKey, positionNftAccount: nftAccount, pool, position, tokenAVault: vaultA, tokenBVault: vaultB, eventAuthority })
+      .instruction();
+
   it("a token that is not full cannot graduate", async () => {
     await program.methods
       .createCurve("Grad", "GRAD", "", 100, 3000, new BN(3600), 5000, new BN(3600), 5000, 0)
@@ -178,26 +189,46 @@ describe("graduation to a Meteora pool", function () {
       .rpc();
     // a holder with a small position, so rewards exist later
     await program.methods.buy(new BN(1 * LAMPORTS_PER_SOL), new BN(0)).accountsPartial({ buyer: holder.publicKey, mint: mint.publicKey }).signers([holder]).rpc();
-    await expectError(prepareIx().rpc(), /NotComplete|not full/i);
+    await expectError(graduateTx([await prepareIx().instruction(), await poolIx(1n << 64n, 1000n)]), /NotComplete|not full/i);
   });
 
-  it("graduation step 1: the hook is switched off and the funds are set aside", async () => {
+  it("graduation step 1 cannot run on its own, and a bad step 2 undoes it", async () => {
     // a big buy clamps to the last tokens on the curve and fills it
     await program.methods.buy(new BN(150 * LAMPORTS_PER_SOL), new BN(0)).accountsPartial({ buyer: payer.publicKey, mint: mint.publicKey }).rpc();
-    const before: any = await (program.account as any).curve.fetch(curve);
-    assert.isTrue(before.complete);
-    const realSol = big(before.realSol);
+    const full: any = await (program.account as any).curve.fetch(curve);
+    assert.isTrue(full.complete);
+    nums = poolNumbers((await spl.getAccount(c, vault, "confirmed", T22)).amount, big(full.realSol) - 50_000_000n);
 
-    await prepareIx().rpc();
+    // step 1 alone is refused: nobody can leave the token half graduated
+    await expectError(prepareIx().rpc(), /NeedsPoolStep|same transaction/i);
+    // a pool opened at a wrong price, or with too little liquidity, fails and takes step 1 down with it
+    await expectError(graduateTx([await prepareIx().instruction(), await poolIx(nums.sp * 2n, nums.L)]), /BadPrice|does not match/i); // double the price
+    await expectError(graduateTx([await prepareIx().instruction(), await poolIx(nums.sp / 2n, nums.L)]), /BadPrice|does not match/i); // half the price
+    await expectError(graduateTx([await prepareIx().instruction(), await poolIx(nums.sp, nums.L / 2n)]), /PoolNotFilled|did not take all/i); // would leave half the funds behind
+    const still: any = await (program.account as any).curve.fetch(curve);
+    assert.equal(still.graduatedStage, 0, "nothing was changed by the failed attempts");
+    assert.isTrue((await spl.getAccount(c, vault, "confirmed", T22)).amount > 0n, "the tokens are still in the curve's vault");
+    const m0 = await spl.getMint(c, mint.publicKey, "confirmed", T22);
+    assert.isTrue(!!spl.getTransferHook(m0) && !spl.getTransferHook(m0)!.programId.equals(PublicKey.default), "the hook is still on");
+  });
+
+  it("graduation: hook off, funds set aside, pool created and its liquidity locked, in one transaction", async () => {
+    const before: any = await (program.account as any).curve.fetch(curve);
+    const realSol = big(before.realSol);
+    const sig = await graduateTx([await prepareIx().instruction(), await poolIx(nums.sp, nums.L), await lockIx().instruction()]);
+    const info: any = await c.getTransaction(sig, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
+    console.log("      whole graduation: compute units", info.meta.computeUnitsConsumed);
 
     const after: any = await (program.account as any).curve.fetch(curve);
-    assert.equal(after.graduatedStage, 1);
+    assert.equal(after.graduatedStage, 3);
+    assert.equal(after.pool.toBase58(), pool.toBase58());
     assert.equal(big(after.lpSol), realSol - 50_000_000n, "all SOL raised minus the 0.05 SOL setup cost");
     assert.equal(big(after.realSol), 0n);
-    assert.equal((await spl.getAccount(c, gradToken, "confirmed", T22)).amount, big(after.lpTokens));
-    // the SOL is in the wrapped SOL account as lamports (counted as tokens at the start of step 2)
-    assert.isTrue(BigInt(await c.getBalance(gradWsol, "confirmed")) >= big(after.lpSol), "the SOL raised is in the graduation address's wrapped SOL account");
+    assert.isTrue((await spl.getAccount(c, gradToken, "confirmed", T22)).amount <= big(after.lpTokens) / 1000n, "the pool took the tokens");
     assert.equal((await spl.getAccount(c, vault, "confirmed", T22)).amount, 0n, "the curve's account is empty");
+    const pos: any = await (damm.account as any).position.fetch(position);
+    assert.equal(big(pos.permanentLockedLiquidity), nums.L, "all of the liquidity is locked");
+    assert.equal(big(pos.unlockedLiquidity), 0n, "none of it can be withdrawn");
 
     // the hook is gone for good: no hook program and no authority left to set one
     const m = await spl.getMint(c, mint.publicKey, "confirmed", T22);
@@ -219,38 +250,12 @@ describe("graduation to a Meteora pool", function () {
     );
     assert.equal((await spl.getAccount(c, friendAta, "confirmed", T22)).amount, bal / 10n);
 
-    // and trading on the old curve is over
+    // trading on the old curve is over, and graduation cannot be run twice
     await expectError(
-      program.methods.sell(new BN(1000), new BN(0)).accountsPartial({ seller: holder.publicKey, mint: mint.publicKey }).signers([holder]).rpc(),
+      program.methods.sell(new BN(1_000_000_000), new BN(0)).accountsPartial({ seller: holder.publicKey, mint: mint.publicKey }).signers([holder]).rpc(),
       /AlreadyGraduating|graduating/i
     );
-    await expectError(prepareIx().rpc(), /WrongStage|not at the right step/i);
-  });
-
-  it("the pool cannot be opened at a wrong price, and cannot keep part of the funds back", async () => {
-    const cv: any = await (program.account as any).curve.fetch(curve);
-    nums = poolNumbers(big(cv.lpTokens), big(cv.lpSol));
-    await expectError(createPool(nums.sp * 2n, nums.L).rpc(), /BadPrice|does not match/i); // a price twice as high
-    await expectError(createPool(nums.sp / 2n, nums.L).rpc(), /BadPrice|does not match/i); // half the price
-    await expectError(createPool(nums.sp, nums.L / 2n).rpc(), /PoolNotFilled|did not take all/i); // too little liquidity: would leave half the funds behind
-  });
-
-  it("graduation step 2 and 3: the pool is created and its liquidity locked for good", async () => {
-    const sig = await createPool(nums.sp, nums.L).rpc();
-    const info: any = await c.getTransaction(sig, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
-    console.log("      create pool: compute units", info.meta.computeUnitsConsumed);
-    const cv: any = await (program.account as any).curve.fetch(curve);
-    assert.equal(cv.graduatedStage, 2);
-    assert.equal(cv.pool.toBase58(), pool.toBase58());
-    assert.isTrue((await spl.getAccount(c, gradToken, "confirmed", T22)).amount <= big(cv.lpTokens) / 1000n, "the pool took the tokens");
-    await expectError(createPool(nums.sp, nums.L).rpc(), /WrongStage|not at the right step/i);
-
-    await lockIx().rpc();
-    const done: any = await (program.account as any).curve.fetch(curve);
-    assert.equal(done.graduatedStage, 3);
-    const pos: any = await (damm.account as any).position.fetch(position);
-    assert.equal(big(pos.permanentLockedLiquidity), nums.L, "all of the liquidity is locked");
-    assert.equal(big(pos.unlockedLiquidity), 0n, "none of it can be withdrawn");
+    await expectError(graduateTx([await prepareIx().instruction(), await poolIx(nums.sp, nums.L)]), /WrongStage|not at the right step/i);
     await expectError(lockIx().rpc(), /WrongStage|not at the right step/i);
   });
 

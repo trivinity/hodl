@@ -17,6 +17,9 @@ use spl_token_2022::{extension::ExtensionType, instruction::AuthorityType};
 pub mod graduation;
 pub mod math;
 use graduation::*;
+
+/// The instructions sysvar (lists every instruction of the running transaction).
+pub const INSTRUCTIONS_SYSVAR_ID: Pubkey = pubkey!("Sysvar1nstructions1111111111111111111111111");
 use math::*;
 
 // placeholder, run `anchor keys sync` after the first build
@@ -511,10 +514,13 @@ pub mod hold_launchpad {
     pub fn claim_rewards(ctx: Context<ClaimRewards>) -> Result<()> {
         let acc = ctx.accounts.curve.acc_per_token;
         let balance = ctx.accounts.claimer_ata.amount;
+        let graduating = ctx.accounts.curve.graduated_stage >= 1;
         let pos = &mut ctx.accounts.position;
 
-        // only tokens still in the wallet earn: moving tokens away does not keep rewards flowing
-        let eff = pos.tracked.min(balance);
+        // Only tokens still in the wallet earn: moving tokens away does not keep rewards flowing.
+        // Once graduation has started, nothing new can be earned (the curve is closed and rewards stopped growing), and tokens may
+        // leave wallets without touching this record. What was earned while the tokens sat here is still owed, so it is paid in full.
+        let eff = if graduating { pos.tracked } else { pos.tracked.min(balance) };
         let earned = reward_owed(eff, acc, pos.reward_debt).ok_or(LaunchError::MathError)?;
         let pending = pos.pending_rewards.checked_add(earned).ok_or(LaunchError::MathError)?;
         require!(pending > 0, LaunchError::NothingToClaim);
@@ -554,13 +560,22 @@ pub mod hold_launchpad {
     pub fn graduate_prepare(ctx: Context<GraduatePrepare>) -> Result<()> {
         let mint_key = ctx.accounts.mint.key();
         let curve_bump = ctx.accounts.curve.bump;
+        // an emergency pause also stops the SOL raised from moving to a third party's program
+        require!(!ctx.accounts.config.paused, LaunchError::Paused);
+        // Step 2 must be in the SAME transaction. Once the hook is off, anyone could open a Meteora pool for this token (a pool's address
+        // depends only on the two tokens) and step 2 would fail forever, trapping the SOL. In one transaction a failed step 2 undoes step 1.
+        require_pool_step_follows(&ctx.accounts.instructions, &mint_key)?;
+        let expected_leftover;
         {
             let c = &ctx.accounts.curve;
             require!(c.complete, LaunchError::NotComplete);
             require!(c.graduated_stage == 0, LaunchError::WrongStage);
             require!(c.real_sol > SETUP_COST.saturating_mul(2), LaunchError::MathError);
+            // the tokens the curve itself owns: whatever it did not sell. Tokens someone sent into the vault by hand stay behind
+            // instead of changing the pool's opening price.
+            expected_leftover = TOTAL_SUPPLY.checked_sub(INIT_REAL_TOKENS).and_then(|x| x.checked_add(c.real_tokens)).ok_or(LaunchError::MathError)?;
         }
-        let lp_tokens = ctx.accounts.vault.amount;
+        let lp_tokens = ctx.accounts.vault.amount.min(expected_leftover);
         require!(lp_tokens > 0, LaunchError::MathError);
         let lp_sol = ctx.accounts.curve.real_sol - SETUP_COST;
 
@@ -969,6 +984,15 @@ fn move_lamports<'info>(from: &AccountInfo<'info>, to: &AccountInfo<'info>, amou
     Ok(())
 }
 
+/// Is a later instruction of this very transaction our `graduate_create_pool` for this token? (If it fails, the whole transaction,
+/// including step 1, is undone, so a token can never be left half graduated.)
+fn require_pool_step_follows(ix_sysvar: &AccountInfo, mint: &Pubkey) -> Result<()> {
+    let want = <crate::instruction::GraduateCreatePool as anchor_lang::Discriminator>::DISCRIMINATOR;
+    let data = ix_sysvar.try_borrow_data()?;
+    require!(pool_step_follows(&data, &crate::ID, want, mint), LaunchError::NeedsPoolStep);
+    Ok(())
+}
+
 /// Move tokens with Token-2022, passing along the extra accounts the transfer hook needs.
 /// (Anchor's own transfer helper does not forward them, so the instruction is built here.)
 #[allow(clippy::too_many_arguments)]
@@ -1310,6 +1334,13 @@ pub struct GraduatePrepare<'info> {
     #[account(mut)]
     pub caller: Signer<'info>,
 
+    #[account(seeds = [CONFIG_SEED], bump = config.bump)]
+    pub config: Account<'info, Config>,
+
+    /// CHECK: the instructions sysvar, used to see that step 2 is in the same transaction
+    #[account(address = INSTRUCTIONS_SYSVAR_ID)]
+    pub instructions: UncheckedAccount<'info>,
+
     #[account(mut, seeds = [CURVE_SEED, mint.key().as_ref()], bump = curve.bump, has_one = mint)]
     pub curve: Account<'info, Curve>,
 
@@ -1596,4 +1627,6 @@ pub enum LaunchError {
     PoolNotFilled,
     #[msg("This token is graduating: trading on the curve is over")]
     AlreadyGraduating,
+    #[msg("Graduation step 1 must be sent in the same transaction as step 2 (creating the pool)")]
+    NeedsPoolStep,
 }

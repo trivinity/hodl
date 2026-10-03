@@ -6,6 +6,7 @@ export function friendlyError(e: unknown): string {
   if (/HolderLimitExceeded|already sold/i.test(all)) return "This wallet already used its sell limit for this window. Sell less, or wait for the window to reset.";
   if (/SlippageExceeded|Slippage/i.test(all)) return "The price moved while you were signing. Try again.";
   if (/NothingToClaim|No fees to claim/i.test(all)) return "No rewards to claim yet. They build up when other holders sell early.";
+  if (/NeedsPoolStep/i.test(all)) return "Graduation has to run as one transaction. Please try again from the token page.";
   if (/NotComplete/i.test(all)) return "This token is not full yet, so it cannot graduate.";
   if (/AlreadyGraduating|graduating/i.test(all)) return "This token is graduating. Trading on the curve has ended.";
   if (/PoolNotFilled|BadPrice/i.test(all)) return "The pool setup was refused as unsafe. Nothing was spent. Try again.";

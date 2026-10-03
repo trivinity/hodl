@@ -1452,6 +1452,28 @@
           "signer": true
         },
         {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "instructions",
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        },
+        {
           "name": "curve",
           "writable": true,
           "pda": {
@@ -2326,6 +2348,11 @@
       "code": 6013,
       "name": "AlreadyGraduating",
       "msg": "This token is graduating: trading on the curve is over"
+    },
+    {
+      "code": 6014,
+      "name": "NeedsPoolStep",
+      "msg": "Graduation step 1 must be sent in the same transaction as step 2 (creating the pool)"
     }
   ],
   "types": [

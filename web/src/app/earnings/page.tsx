@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Transaction } from "@solana/web3.js";
+import { createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAddressSync, TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
 import { useAnchorWallet, useConnection } from "@solana/wallet-adapter-react";
 import Avatar from "@/components/Avatar";
 import { CurveView, MyPosition, getTokenBalance, listCurves, listPositions, readProgram, walletProgram } from "@/lib/program";
@@ -58,8 +59,9 @@ export default function Earnings() {
       const curve = byMint.get(p.mint.toBase58());
       if (!curve) continue; // a token from an older version of the program
       const balance = data.balances.get(p.mint.toBase58()) ?? 0n;
-      // same rule as the program: only tokens still in the wallet earn
-      const eff = p.tracked < balance ? p.tracked : balance;
+      // same rule as the program: only tokens still in the wallet earn, until graduation starts. After that nothing new is earned, and what
+      // was earned while the tokens sat in the wallet is paid in full even if the tokens have since moved
+      const eff = curve.graduatedStage >= 1 || p.tracked < balance ? p.tracked : balance;
       const claimable = rewardOwed(eff, curve.accPerToken, p.rewardDebt, p.pendingRewards);
       if (balance === 0n && claimable === 0n) continue; // nothing here any more
       const oldTs = p.avgTs !== 0n ? p.avgTs : BigInt(now);
@@ -90,6 +92,8 @@ export default function Earnings() {
       for (let i = 0; i < list.length; i += 3) {
         const tx = new Transaction();
         for (const r of list.slice(i, i + 3)) {
+          // the program needs the wallet's token account to exist, even when the tokens have been sold (it may have been closed)
+          tx.add(createAssociatedTokenAccountIdempotentInstruction(wallet.publicKey, getAssociatedTokenAddressSync(r.curve.mint, wallet.publicKey, false, TOKEN_2022_PROGRAM_ID), wallet.publicKey, r.curve.mint, TOKEN_2022_PROGRAM_ID));
           tx.add(await program.methods.claimRewards().accountsPartial({ claimer: wallet.publicKey, mint: r.curve.mint }).instruction());
         }
         await program.provider.sendAndConfirm!(tx);
