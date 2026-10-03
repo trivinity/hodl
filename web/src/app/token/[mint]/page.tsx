@@ -5,6 +5,9 @@ import { PublicKey } from "@solana/web3.js";
 import Avatar from "@/components/Avatar";
 import TaxMelt from "@/components/TaxMelt";
 import PriceChart from "@/components/PriceChart";
+import StatsBar from "@/components/StatsBar";
+import HoldersTable from "@/components/HoldersTable";
+import TokenActions from "@/components/TokenActions";
 import TradePanel from "@/components/TradePanel";
 import GraduatePanel from "@/components/GraduatePanel";
 import { useConfig } from "@/lib/useConfig";
@@ -23,6 +26,7 @@ export default function TokenPage({ params }: { params: Promise<{ mint: string }
   const [missing, setMissing] = useState(false);
   const [trades, setTrades] = useState<TradeView[]>([]);
   const [held, setHeld] = useState<number | null>(null);
+  const [tab, setTab] = useState<"trades" | "holders">("trades");
   const [history, setHistory] = useState<PricePoint[]>([]);
   const [poolCap, setPoolCap] = useState<number | null>(null);
 
@@ -69,6 +73,7 @@ export default function TokenPage({ params }: { params: Promise<{ mint: string }
             <p className="muted">
               Created {ago(curve.createdAt)} by {short(curve.creator.toBase58())}
             </p>
+            <TokenActions mint={curve.mint.toBase58()} />
           </div>
         </header>
 
@@ -104,6 +109,8 @@ export default function TokenPage({ params }: { params: Promise<{ mint: string }
           {graduated ? "The curve sold out and the token moved to its Meteora pool." : `${Math.round(p * 100)}% of the curve sold. Trading ends when it is full.`}
         </p>
 
+        <StatsBar points={history} live={graduated ? poolCap : marketCapSol(curve.vs, curve.vt)} />
+
         <h2 className="h2">Price</h2>
         <PriceChart
           points={history}
@@ -111,8 +118,20 @@ export default function TokenPage({ params }: { params: Promise<{ mint: string }
           note={graduated ? "Trades on the curve, then the latest price read from the Meteora pool. Individual pool trades are not shown." : undefined}
         />
 
-        <h2 className="h2">Recent trades</h2>
-        {trades.length === 0 ? (
+        <div className="tabs-row">
+          <h2 className="h2">{tab === "trades" ? "Recent trades" : "Holders"}</h2>
+          <div className="seg" role="tablist" aria-label="Trades or holders">
+            <button role="tab" aria-selected={tab === "trades"} className={tab === "trades" ? "seg-on" : ""} onClick={() => setTab("trades")}>
+              Trades
+            </button>
+            <button role="tab" aria-selected={tab === "holders"} className={tab === "holders" ? "seg-on" : ""} onClick={() => setTab("holders")}>
+              Holders
+            </button>
+          </div>
+        </div>
+        {tab === "holders" ? (
+          <HoldersTable curve={curve} />
+        ) : trades.length === 0 ? (
           <p className="muted">No trades yet.</p>
         ) : (
           <table className="trades">

@@ -44,8 +44,8 @@ export function dbActivity(limit = 14) {
   return rest<DbActivity[]>(`trades?select=sig,mint,is_buy,trader,sol,ts&order=slot.desc,idx.desc&limit=${limit}`);
 }
 
-export type DbPricePoint = { ts: string; is_buy: boolean; virtual_sol: number; virtual_tokens: number };
+export type DbPricePoint = { ts: string; is_buy: boolean; virtual_sol: number; virtual_tokens: number; sol: number; trader: string };
 /** every trade of one token, oldest first: each row carries the curve reserves right after it, which is all a price chart needs */
 export function dbPriceHistory(mint: string, limit = 1000) {
-  return rest<DbPricePoint[]>(`trades?select=ts,is_buy,virtual_sol,virtual_tokens&mint=eq.${encodeURIComponent(mint)}&order=slot.asc,idx.asc&limit=${limit}`);
+  return rest<DbPricePoint[]>(`trades?select=ts,is_buy,virtual_sol,virtual_tokens,sol,trader&mint=eq.${encodeURIComponent(mint)}&order=slot.asc,idx.asc&limit=${limit}`);
 }

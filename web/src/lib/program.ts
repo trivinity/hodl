@@ -324,7 +324,7 @@ export async function listPositions(program: anchor.Program<any>, owner: PublicK
 }
 
 /** one point of the price chart: market cap in SOL at a moment (unix seconds) */
-export type PricePoint = { t: number; cap: number; isBuy?: boolean };
+export type PricePoint = { t: number; cap: number; isBuy?: boolean; sol?: number; trader?: string };
 
 const capOf = (vs: bigint, vt: bigint) => (vt === 0n ? 0 : (Number(vs) / 1e9 / (Number(vt) / 1e6)) * 1_000_000_000);
 
@@ -334,7 +334,7 @@ export async function loadPriceHistory(connection: Connection, program: anchor.P
     try {
       const rows = await dbPriceHistory(mint.toBase58());
       if (rows.length === 0) throw new Error("no indexed rows");
-      return rows.map((r) => ({ t: Math.floor(new Date(r.ts).getTime() / 1000), cap: capOf(BigInt(r.virtual_sol), BigInt(r.virtual_tokens)), isBuy: r.is_buy }));
+      return rows.map((r) => ({ t: Math.floor(new Date(r.ts).getTime() / 1000), cap: capOf(BigInt(r.virtual_sol), BigInt(r.virtual_tokens)), isBuy: r.is_buy, sol: Number(r.sol) / 1e9, trader: r.trader }));
     } catch {
       /* fall through to the chain */
     }
@@ -350,7 +350,7 @@ export async function loadPriceHistory(connection: Connection, program: anchor.P
     for (const ev of parser.parseLogs(logs)) {
       if (ev.name.toLowerCase() !== "trade") continue;
       const d: any = ev.data;
-      out.push({ t: Number(d.ts), cap: capOf(b(d.virtualSol), b(d.virtualTokens)), isBuy: d.isBuy });
+      out.push({ t: Number(d.ts), cap: capOf(b(d.virtualSol), b(d.virtualTokens)), isBuy: d.isBuy, sol: Number(b(d.sol)) / 1e9, trader: d.trader.toBase58() });
     }
   }
   return out.sort((a, c) => a.t - c.t);
@@ -368,4 +368,22 @@ export async function loadPoolCap(connection: Connection, pool: PublicKey): Prom
   const root = Number(sp) / 2 ** 64;
   const lamportsPerBaseUnit = root * root;
   return ((lamportsPerBaseUnit * 1e6) / 1e9) * 1_000_000_000; // SOL per whole token (6 decimals) times 1B supply
+}
+
+export type HolderRow = { owner: PublicKey; tracked: bigint; avgTs: number; pending: bigint; rewardDebt: bigint };
+
+/** everyone with a position in this token (one account per wallet), biggest first */
+export async function listHolders(program: anchor.Program<any>, mint: PublicKey): Promise<HolderRow[]> {
+  // memcmp offset 40 = 8 byte discriminator + 32 byte owner, where the mint address starts
+  const all = await (program.account as any).position.all([{ memcmp: { offset: 40, bytes: mint.toBase58() } }]);
+  return all
+    .map((a: any) => ({
+      owner: a.account.owner as PublicKey,
+      tracked: b(a.account.tracked),
+      avgTs: Number(b(a.account.avgTs)),
+      pending: b(a.account.pendingRewards),
+      rewardDebt: b(a.account.rewardDebt),
+    }))
+    .filter((r: HolderRow) => r.tracked > 0n || r.pending > 0n)
+    .sort((x: HolderRow, y: HolderRow) => (y.tracked > x.tracked ? 1 : y.tracked < x.tracked ? -1 : 0));
 }

@@ -1,5 +1,6 @@
 "use client";
 import UnitToggle from "@/components/UnitToggle";
+import { useWatchlist } from "@/lib/useWatchlist";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useConnection } from "@solana/wallet-adapter-react";
@@ -11,13 +12,15 @@ import ActivityStrip from "@/components/ActivityStrip";
 import { ActivityItem, CurveView, listCurves, loadActivity, readProgram } from "@/lib/program";
 import { marketCapSol, progress } from "@/lib/curve";
 
-type Sort = "new" | "close" | "big";
+type Sort = "new" | "close" | "big" | "watch";
 
 export default function Home() {
   const { connection } = useConnection();
   const [curves, setCurves] = useState<CurveView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sort, setSort] = useState<Sort>("new");
+  const [query, setQuery] = useState("");
+  const watch = useWatchlist();
   const [activity, setActivity] = useState<ActivityItem[] | null>(null);
   const knownMints = useRef<Set<string>>(new Set());
   useEffect(() => {
@@ -68,12 +71,15 @@ export default function Home() {
 
   const sorted = useMemo(() => {
     if (!curves) return [];
-    const c = [...curves];
-    if (sort === "new") c.sort((a, b) => b.createdAt - a.createdAt);
+    const q = query.trim().toLowerCase();
+    let c = [...curves];
+    if (q) c = c.filter((x) => x.name.toLowerCase().includes(q) || x.symbol.toLowerCase().includes(q) || x.mint.toBase58().toLowerCase().startsWith(q));
+    if (sort === "watch") c = c.filter((x) => watch.has(x.mint.toBase58()));
+    if (sort === "new" || sort === "watch") c.sort((a, b) => b.createdAt - a.createdAt);
     if (sort === "close") c.sort((a, b) => progress(b.realTokens) - progress(a.realTokens));
     if (sort === "big") c.sort((a, b) => marketCapSol(b.vs, b.vt) - marketCapSol(a.vs, a.vt));
     return c;
-  }, [curves, sort]);
+  }, [curves, sort, query, watch.list]);
 
   return (
     <>
@@ -105,6 +111,7 @@ export default function Home() {
       <section id="tokens" className="list-wrap">
         <div className="list-head">
           <h2>Tokens</h2>
+          <input className="search" type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search name, symbol or address" aria-label="Search tokens" />
           <UnitToggle />
           <div className="seg" role="tablist" aria-label="Sort tokens">
             {(
@@ -112,6 +119,7 @@ export default function Home() {
                 ["new", "Newest"],
                 ["close", "Closest to full"],
                 ["big", "Biggest"],
+                ["watch", "★ Watchlist"],
               ] as [Sort, string][]
             ).map(([k, label]) => (
               <button key={k} role="tab" aria-selected={sort === k} className={sort === k ? "seg-on" : ""} onClick={() => setSort(k)}>
@@ -134,6 +142,10 @@ export default function Home() {
               Launch the first one
             </Link>
           </div>
+        )}
+
+        {curves && curves.length > 0 && sorted.length === 0 && (
+          <p className="muted">{sort === "watch" && !query ? "Nothing on your watchlist yet. Open a token and press Watch." : "No tokens match that."}</p>
         )}
 
         <div className="tgrid">

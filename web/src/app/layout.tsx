@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Providers from "@/components/Providers";
 import Header from "@/components/Header";
+import TabBar from "@/components/TabBar";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -23,6 +24,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Providers>
           <Header />
           <main className="page">{children}</main>
+          <TabBar />
           <footer className="foot">
             HODL is an unaudited prototype. Only trade with money you can lose.
           </footer>
