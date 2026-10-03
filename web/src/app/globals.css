@@ -12,6 +12,7 @@
   --sell-soft: #fbeef1;
   --buy-soft: #eef7f3;
   --focus: rgba(13, 13, 13, 0.14);
+  --logo-accent: #e8466a;
   --display: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
   --body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -33,6 +34,7 @@
     --sell-soft: #2a1519;
     --buy-soft: #12231c;
     --focus: rgba(244, 244, 245, 0.2);
+    --logo-accent: #ff6b86;
     color-scheme: dark;
   }
 }

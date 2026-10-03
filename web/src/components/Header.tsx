@@ -1,4 +1,5 @@
 "use client";
+import Logo from "@/components/Logo";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
@@ -53,7 +54,7 @@ export default function Header() {
     )}
     <header className="top">
       <Link href="/" className="wordmark" aria-label="HODL home">
-        HODL
+        <Logo />
       </Link>
       <nav className="nav">
         <Link href="/">Tokens</Link>
