@@ -1413,3 +1413,7 @@ input:focus {
   letter-spacing: 0;
   margin-top: 2px;
 }
+.seg button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

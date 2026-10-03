@@ -19,25 +19,28 @@ export default function PriceChart({ points, live, note }: { points: PricePoint[
   const ref = useRef<SVGSVGElement>(null);
 
   const now = Math.floor(Date.now() / 1000);
-  const series = useMemo(() => {
+  // a window is only useful once the token has filled at least a tenth of it
+  const span = points.length ? now - points[0].t : 0;
+  const tooYoung = (secs: number) => secs > 0 && span < secs * 0.1;
+  const active = tooYoung(RANGES.find((r) => r.id === range)!.secs) ? "all" : range;
+  const secs = RANGES.find((r) => r.id === active)!.secs;
+  const { series, t0, t1 } = useMemo(() => {
     const all = [...points];
     if (live !== null && live > 0) all.push({ t: now, cap: live });
-    const secs = RANGES.find((r) => r.id === range)!.secs;
-    if (secs === 0 || all.length === 0) return all;
-    const from = now - secs;
+    if (all.length === 0) return { series: [] as PricePoint[], t0: now - 1, t1: now };
+    // "All" starts at the first trade; 1h and 24h are real windows ending now, even if the token is younger
+    const from = secs === 0 ? all[0].t : now - secs;
     const inside = all.filter((p) => p.t >= from);
     const before = all.filter((p) => p.t < from);
     // carry the price that was valid when the window opened, so the line starts at the left edge
     if (before.length) inside.unshift({ t: from, cap: before[before.length - 1].cap });
-    return inside;
-  }, [points, live, range, now]);
+    return { series: inside, t0: from, t1: Math.max(now, from + 1) };
+  }, [points, live, secs, now]);
 
   if (series.length === 0) {
     return <p className="notice">No trades yet. The chart starts with the first trade.</p>;
   }
 
-  const t0 = series[0].t;
-  const t1 = Math.max(series[series.length - 1].t, t0 + 1);
   const caps = series.map((p) => p.cap);
   let lo = Math.min(...caps);
   let hi = Math.max(...caps);
@@ -94,7 +97,7 @@ export default function PriceChart({ points, live, note }: { points: PricePoint[
         </div>
         <div className="seg" role="group" aria-label="Chart range">
           {RANGES.map((r) => (
-            <button key={r.id} type="button" className={range === r.id ? "seg-on" : ""} onClick={() => setRange(r.id)}>
+            <button key={r.id} type="button" className={active === r.id ? "seg-on" : ""} disabled={tooYoung(r.secs)} title={tooYoung(r.secs) ? "This token is too new for that window" : undefined} onClick={() => setRange(r.id)}>
               {r.label}
             </button>
           ))}
@@ -127,13 +130,17 @@ export default function PriceChart({ points, live, note }: { points: PricePoint[
           );
         })}
         {series.length > 1 && <path d={area} fill="url(#pcFill)" />}
-        <path d={line} fill="none" stroke={colour} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
+        {series.length > 1 ? (
+          <path d={line} fill="none" stroke={colour} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
+        ) : (
+          <circle cx={x(series[0].t)} cy={y(series[0].cap)} r={5} fill={colour} />
+        )}
         {series.length <= 60 &&
           series.map((p, i) =>
             p.isBuy === undefined ? null : <circle key={i} cx={x(p.t)} cy={y(p.cap)} r={3} fill={p.isBuy ? "var(--buy)" : "var(--sell)"} />
           )}
         <text x={PAD.l} y={H - 8} className="melt-tick" textAnchor="start">
-          {ago(t0)}
+          {secs === 0 ? ago(t0) : `${RANGES.find((r) => r.id === active)!.label} ago`}
         </text>
         <text x={W - PAD.r} y={H - 8} className="melt-tick" textAnchor="end">
           now
@@ -145,6 +152,7 @@ export default function PriceChart({ points, live, note }: { points: PricePoint[
           </g>
         )}
       </svg>
+      {points.length === 0 && <figcaption className="melt-cap">Trade history is not available yet. The line fills in as trades happen.</figcaption>}
       {note && <figcaption className="melt-cap">{note}</figcaption>}
     </figure>
   );
