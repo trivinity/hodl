@@ -34,6 +34,11 @@ export default function TokenCard({ c }: { c: CurveView }) {
       <div className="chips">
         <span className="chip-info">{pct(c.rewardBps)}% of tax to holders</span>
         {c.holderFeeBps > 0 && <span className="chip-info">{pct(c.holderFeeBps)}% fee to holders</span>}
+        {c.graduatedStage >= 3 ? (
+          <span className="chip-info chip-hot">Graduated</span>
+        ) : c.complete || c.graduatedStage > 0 ? (
+          <span className="chip-info chip-hot">Ready to graduate</span>
+        ) : null}
         {waiting > 0n && <span className="chip-info chip-hot">{sol(waiting, 3)} SOL waiting</span>}
       </div>
 

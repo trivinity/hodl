@@ -430,6 +430,288 @@
       "args": []
     },
     {
+      "name": "claim_pool_fees",
+      "docs": [
+        "Anyone can call this. Collects the trading fees the locked pool has earned (always in SOL) and sends them to the",
+        "treasury address in the config. Nothing else can receive them."
+      ],
+      "discriminator": [
+        33,
+        187,
+        125,
+        186,
+        41,
+        247,
+        236,
+        89
+      ],
+      "accounts": [
+        {
+          "name": "caller",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "curve",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  117,
+                  114,
+                  118,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "curve"
+          ]
+        },
+        {
+          "name": "grad",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  114,
+                  97,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "grad_token",
+          "writable": true
+        },
+        {
+          "name": "grad_wsol",
+          "writable": true
+        },
+        {
+          "name": "wsol_mint",
+          "address": "So11111111111111111111111111111111111111112"
+        },
+        {
+          "name": "pool_authority",
+          "address": "HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B8hQMKmDaiTLcC"
+        },
+        {
+          "name": "pool"
+        },
+        {
+          "name": "position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "curve.position_nft_mint",
+                "account": "Curve"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                9,
+                45,
+                33,
+                53,
+                101,
+                122,
+                21,
+                156,
+                43,
+                135,
+                212,
+                182,
+                106,
+                112,
+                219,
+                142,
+                151,
+                82,
+                56,
+                159,
+                247,
+                106,
+                175,
+                32,
+                108,
+                237,
+                6,
+                58,
+                56,
+                249,
+                90,
+                237
+              ]
+            }
+          }
+        },
+        {
+          "name": "position_nft_account",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110,
+                  95,
+                  110,
+                  102,
+                  116,
+                  95,
+                  97,
+                  99,
+                  99,
+                  111,
+                  117,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "curve.position_nft_mint",
+                "account": "Curve"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                9,
+                45,
+                33,
+                53,
+                101,
+                122,
+                21,
+                156,
+                43,
+                135,
+                212,
+                182,
+                106,
+                112,
+                219,
+                142,
+                151,
+                82,
+                56,
+                159,
+                247,
+                106,
+                175,
+                32,
+                108,
+                237,
+                6,
+                58,
+                56,
+                249,
+                90,
+                237
+              ]
+            }
+          }
+        },
+        {
+          "name": "token_a_vault",
+          "writable": true
+        },
+        {
+          "name": "token_b_vault",
+          "writable": true
+        },
+        {
+          "name": "treasury",
+          "writable": true
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "damm_program",
+          "address": "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+        },
+        {
+          "name": "classic_token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "claim_rewards",
       "docs": [
         "Pay out the holder rewards this wallet has earned from other people's sell taxes."
@@ -779,6 +1061,536 @@
           "type": "u16"
         }
       ]
+    },
+    {
+      "name": "graduate_create_pool",
+      "docs": [
+        "Graduation step 2 (anyone can call): create the Meteora pool from the funds set aside, opening at the price those",
+        "funds imply. The caller supplies the price and liquidity numbers; the program checks them against the real funds."
+      ],
+      "discriminator": [
+        183,
+        119,
+        66,
+        253,
+        210,
+        14,
+        64,
+        84
+      ],
+      "accounts": [
+        {
+          "name": "caller",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "curve",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  117,
+                  114,
+                  118,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "curve"
+          ]
+        },
+        {
+          "name": "grad",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  114,
+                  97,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "grad_token",
+          "writable": true
+        },
+        {
+          "name": "grad_wsol",
+          "writable": true
+        },
+        {
+          "name": "wsol_mint",
+          "docs": [
+            "pinned to the wrapped SOL mint"
+          ],
+          "address": "So11111111111111111111111111111111111111112"
+        },
+        {
+          "name": "position_nft_mint",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "position_nft_account",
+          "writable": true
+        },
+        {
+          "name": "pool_authority",
+          "address": "HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B8hQMKmDaiTLcC"
+        },
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "position",
+          "writable": true
+        },
+        {
+          "name": "token_a_vault",
+          "writable": true
+        },
+        {
+          "name": "token_b_vault",
+          "writable": true
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "damm_program",
+          "address": "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+        },
+        {
+          "name": "classic_token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "sqrt_price",
+          "type": "u128"
+        },
+        {
+          "name": "liquidity",
+          "type": "u128"
+        }
+      ]
+    },
+    {
+      "name": "graduate_lock",
+      "docs": [
+        "Graduation step 3 (anyone can call): lock the pool's liquidity for good. After this nobody can ever withdraw it."
+      ],
+      "discriminator": [
+        60,
+        110,
+        54,
+        200,
+        180,
+        79,
+        57,
+        106
+      ],
+      "accounts": [
+        {
+          "name": "caller",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "curve",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  117,
+                  114,
+                  118,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "curve"
+          ]
+        },
+        {
+          "name": "grad",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  114,
+                  97,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "curve.position_nft_mint",
+                "account": "Curve"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                9,
+                45,
+                33,
+                53,
+                101,
+                122,
+                21,
+                156,
+                43,
+                135,
+                212,
+                182,
+                106,
+                112,
+                219,
+                142,
+                151,
+                82,
+                56,
+                159,
+                247,
+                106,
+                175,
+                32,
+                108,
+                237,
+                6,
+                58,
+                56,
+                249,
+                90,
+                237
+              ]
+            }
+          }
+        },
+        {
+          "name": "position_nft_account",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110,
+                  95,
+                  110,
+                  102,
+                  116,
+                  95,
+                  97,
+                  99,
+                  99,
+                  111,
+                  117,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "curve.position_nft_mint",
+                "account": "Curve"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                9,
+                45,
+                33,
+                53,
+                101,
+                122,
+                21,
+                156,
+                43,
+                135,
+                212,
+                182,
+                106,
+                112,
+                219,
+                142,
+                151,
+                82,
+                56,
+                159,
+                247,
+                106,
+                175,
+                32,
+                108,
+                237,
+                6,
+                58,
+                56,
+                249,
+                90,
+                237
+              ]
+            }
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "damm_program",
+          "address": "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "graduate_prepare",
+      "docs": [
+        "Graduation step 1 (anyone can call once a token is full): switch the transfer hook off for good, then move the",
+        "leftover tokens and the SOL raised (minus a small fixed setup cost) to the token's graduation address."
+      ],
+      "discriminator": [
+        174,
+        81,
+        137,
+        251,
+        154,
+        159,
+        240,
+        93
+      ],
+      "accounts": [
+        {
+          "name": "caller",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "curve",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  117,
+                  114,
+                  118,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "writable: switching off the transfer hook changes the mint"
+          ],
+          "writable": true,
+          "relations": [
+            "curve"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "curve"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "grad",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  114,
+                  97,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "grad_token",
+          "writable": true
+        },
+        {
+          "name": "grad_wsol",
+          "writable": true
+        },
+        {
+          "name": "wsol_mint",
+          "address": "So11111111111111111111111111111111111111112"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+        },
+        {
+          "name": "classic_token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
     },
     {
       "name": "init_config",
@@ -1366,6 +2178,32 @@
       ]
     },
     {
+      "name": "Graduated",
+      "discriminator": [
+        51,
+        241,
+        66,
+        50,
+        140,
+        245,
+        156,
+        192
+      ]
+    },
+    {
+      "name": "GraduationStarted",
+      "discriminator": [
+        205,
+        171,
+        94,
+        153,
+        51,
+        32,
+        171,
+        72
+      ]
+    },
+    {
       "name": "PauseChanged",
       "discriminator": [
         238,
@@ -1376,6 +2214,19 @@
         209,
         178,
         218
+      ]
+    },
+    {
+      "name": "PoolFeesClaimed",
+      "discriminator": [
+        172,
+        6,
+        248,
+        216,
+        198,
+        124,
+        73,
+        110
       ]
     },
     {
@@ -1450,6 +2301,31 @@
       "code": 6008,
       "name": "NotPendingAdmin",
       "msg": "You are not the proposed admin"
+    },
+    {
+      "code": 6009,
+      "name": "NotComplete",
+      "msg": "This token is not full yet, so it cannot graduate"
+    },
+    {
+      "code": 6010,
+      "name": "WrongStage",
+      "msg": "Graduation is not at the right step for this"
+    },
+    {
+      "code": 6011,
+      "name": "BadPrice",
+      "msg": "The opening price does not match the funds in the pool"
+    },
+    {
+      "code": 6012,
+      "name": "PoolNotFilled",
+      "msg": "The pool did not take all the funds, so it was cancelled"
+    },
+    {
+      "code": 6013,
+      "name": "AlreadyGraduating",
+      "msg": "This token is graduating: trading on the curve is over"
     }
   ],
   "types": [
@@ -1622,6 +2498,39 @@
               "lamports owed to holders and not yet claimed (held in the curve account, outside the price reserves)"
             ],
             "type": "u64"
+          },
+          {
+            "name": "graduated_stage",
+            "docs": [
+              "graduation progress: 0 not started, 1 funds moved and hook off, 2 pool created, 3 liquidity locked (done)"
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "lp_sol",
+            "docs": [
+              "SOL and tokens set aside for the pool at stage 1"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "lp_tokens",
+            "type": "u64"
+          },
+          {
+            "name": "pool",
+            "docs": [
+              "the Meteora pool, its position token, and the liquidity put in (set at stage 2)"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "position_nft_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "lp_liquidity",
+            "type": "u128"
           }
         ]
       }
@@ -1691,6 +2600,50 @@
       }
     },
     {
+      "name": "Graduated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "lp_sol",
+            "type": "u64"
+          },
+          {
+            "name": "lp_tokens",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GraduationStarted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "lp_sol",
+            "type": "u64"
+          },
+          {
+            "name": "lp_tokens",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
       "name": "PauseChanged",
       "type": {
         "kind": "struct",
@@ -1698,6 +2651,22 @@
           {
             "name": "paused",
             "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PoolFeesClaimed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
           }
         ]
       }

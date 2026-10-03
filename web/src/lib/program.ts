@@ -83,6 +83,9 @@ export type CurveView = {
   totalTracked: bigint;
   accPerToken: bigint;
   rewardPool: bigint;
+  /** 0 = on the curve, 1 and 2 = graduating, 3 = graduated (trades on a Meteora pool) */
+  graduatedStage: number;
+  pool: PublicKey;
 };
 
 const b = (x: any) => BigInt(x.toString());
@@ -112,12 +115,14 @@ export function toCurveView(address: PublicKey, c: any): CurveView {
     totalTracked: b(c.totalTracked),
     accPerToken: b(c.accPerToken),
     rewardPool: b(c.rewardPool),
+    graduatedStage: c.graduatedStage,
+    pool: c.pool,
   };
 }
 
 // 8 byte discriminator + Curve::INIT_SPACE from the program. Update when the Curve struct changes;
 // tokens made with an older layout have a different size and are skipped.
-const CURVE_ACCOUNT_SIZE = 372;
+const CURVE_ACCOUNT_SIZE = 469;
 
 export async function listCurves(program: anchor.Program<any>): Promise<CurveView[]> {
   if (!(program.account as any).curve) {

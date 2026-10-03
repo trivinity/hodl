@@ -5,6 +5,7 @@ import { PublicKey } from "@solana/web3.js";
 import Avatar from "@/components/Avatar";
 import TaxMelt from "@/components/TaxMelt";
 import TradePanel from "@/components/TradePanel";
+import GraduatePanel from "@/components/GraduatePanel";
 import { useConfig } from "@/lib/useConfig";
 import { CurveView, TradeView, getCurve, loadTrades, readProgram, curvePda } from "@/lib/program";
 import { marketCapSol, priceSol, progress, INIT_REAL_TOKENS } from "@/lib/curve";
@@ -127,7 +128,11 @@ export default function TokenPage({ params }: { params: Promise<{ mint: string }
       </div>
 
       <aside className="token-side">
-        <TradePanel curve={curve} onTraded={load} onHeld={setHeld} paused={Boolean(config?.paused)} />
+        {curve.complete || curve.graduatedStage > 0 ? (
+          <GraduatePanel curve={curve} onDone={load} />
+        ) : (
+          <TradePanel curve={curve} onTraded={load} onHeld={setHeld} paused={Boolean(config?.paused)} />
+        )}
       </aside>
     </div>
   );
