@@ -38,3 +38,8 @@ export type CurveStats = { mint: string; trade_count: number; volume_lamports: n
 export function dbCurveStats() {
   return rest<CurveStats[]>("curve_stats?select=mint,trade_count,volume_lamports,paid_to_holders_lamports,tax_lamports");
 }
+
+export type DbActivity = { sig: string; mint: string; is_buy: boolean; trader: string; sol: number; ts: string };
+export function dbActivity(limit = 14) {
+  return rest<DbActivity[]>(`trades?select=sig,mint,is_buy,trader,sol,ts&order=slot.desc,idx.desc&limit=${limit}`);
+}

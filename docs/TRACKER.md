@@ -60,7 +60,7 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
       Verified on devnet: token locks in the 1% platform fee, platform fees paid to the treasury (exact amount), buys refused while paused, selling works while paused, resume, holder rewards claim. Test token 6Yhz8iDWsM9EtqCjfaJpdLwUywsRTD9iHDn7yQHEJ6xP. Cost 0.19 SOL; deployer has about 2.89 SOL left.
 
 ## Open: product
-- [ ] Richer home page: totals strip, token cards with sparkline, activity ticker
+- [x] Richer home page: live numbers strip, how-it-works, live activity strip, token cards with a mini tax-fade drawing and rules (price sparkline NOT built; needs trade history per token)
 - [ ] "My earnings" page: everything you can claim across tokens
 - [ ] Holder-first discovery: sort by SOL paid to holders, share who kept holding
 - [ ] Private Vercel preview on devnet: the connector got 403 creating the project, so follow docs/VERCEL.md by hand (site builds cleanly with the devnet settings; verified)
@@ -82,6 +82,8 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
 - [ ] Disk is at 98% full: the local test ledger at ~/tl/test-ledger is 3 GB; delete it when the validator is stopped.
 - [ ] Indexer caveats: first run reads at most 5000 transactions back (reports gap:true if more). Vercel Hobby cron runs once a day only; for every-minute runs use Vercel Pro or a free GitHub Actions schedule.
 - [ ] Devnet program has 3.7 KB of headroom (max-len 335000, program 331256). The CurveCreated event is NOT deployed to devnet yet; it needs an upgrade (about 0.001 SOL in fees, refundable buffer rent).
+
+- Local demo data: `node scripts/seed-local.cjs` fills a local chain with example tokens and trading (refuses non-local networks).
 
 ## Notes
 - Run the admin tool against devnet: `RPC_URL=https://api.devnet.solana.com WALLET=<devnet deploy key file> node scripts/admin.cjs show`.

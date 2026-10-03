@@ -2,7 +2,7 @@ import * as anchor from "@anchor-lang/core";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync, TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
 import idlJson from "../idl.json";
-import { dbConfigured, dbTrades } from "./db";
+import { dbActivity, dbConfigured, dbTrades } from "./db";
 
 export const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || "http://127.0.0.1:8899";
 export const CLUSTER_LABEL = process.env.NEXT_PUBLIC_CLUSTER_LABEL || "localnet";
@@ -233,4 +233,64 @@ export async function loadTrades(connection: Connection, program: anchor.Program
     }
   }
   return out;
+}
+
+export type ActivityItem = {
+  sig: string;
+  kind: "buy" | "sell" | "launch" | "claim";
+  mint: string;
+  who: string;
+  sol: bigint;
+  ts: number;
+};
+
+/** the latest things that happened across all tokens: from the database if it has rows, otherwise straight from the chain */
+export async function loadActivity(
+  connection: Connection,
+  program: anchor.Program<any>,
+  limit = 14,
+  /** only keep activity for tokens that exist on this network (the database may hold rows from another chain) */
+  knownMints?: Set<string>
+): Promise<ActivityItem[]> {
+  if (dbConfigured) {
+    try {
+      const all = await dbActivity(limit * 3);
+      const rows = knownMints ? all.filter((r) => knownMints.has(r.mint)).slice(0, limit) : all.slice(0, limit);
+      if (rows.length > 0) {
+        return rows.map((r) => ({
+          sig: r.sig,
+          kind: r.is_buy ? "buy" : "sell",
+          mint: r.mint,
+          who: r.trader,
+          sol: BigInt(r.sol),
+          ts: Math.floor(new Date(r.ts).getTime() / 1000),
+        }));
+      }
+    } catch {
+      /* fall through to the chain */
+    }
+  }
+  const sigs = (await connection.getSignaturesForAddress(program.programId, { limit }, "confirmed")).filter((s) => !s.err);
+  const parser = new anchor.EventParser(program.programId, program.coder);
+  const out: ActivityItem[] = [];
+  for (let i = 0; i < sigs.length; i += 5) {
+    const batch = sigs.slice(i, i + 5);
+    const txs = await Promise.all(batch.map((s) => connection.getTransaction(s.signature, { maxSupportedTransactionVersion: 0, commitment: "confirmed" }).catch(() => null)));
+    txs.forEach((tx, j) => {
+      const logs = tx?.meta?.logMessages;
+      if (!logs) return;
+      for (const ev of parser.parseLogs(logs)) {
+        const d: any = ev.data;
+        const name = ev.name.toLowerCase();
+        if (name === "trade") {
+          out.push({ sig: batch[j].signature, kind: d.isBuy ? "buy" : "sell", mint: d.mint.toBase58(), who: d.trader.toBase58(), sol: b(d.sol), ts: Number(d.ts) });
+        } else if (name === "curvecreated") {
+          out.push({ sig: batch[j].signature, kind: "launch", mint: d.mint.toBase58(), who: d.creator.toBase58(), sol: 0n, ts: Number(d.ts) });
+        } else if (name === "rewardsclaimed") {
+          out.push({ sig: batch[j].signature, kind: "claim", mint: d.mint.toBase58(), who: d.claimer.toBase58(), sol: b(d.amount), ts: tx?.blockTime ?? Math.floor(Date.now() / 1000) });
+        }
+      }
+    });
+  }
+  return out.sort((a, c) => c.ts - a.ts).slice(0, limit);
 }

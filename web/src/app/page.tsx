@@ -1,12 +1,14 @@
 "use client";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useConnection } from "@solana/wallet-adapter-react";
 import TaxMelt from "@/components/TaxMelt";
-import Avatar from "@/components/Avatar";
-import { CurveView, listCurves, readProgram } from "@/lib/program";
-import { marketCapSol, priceSol, progress } from "@/lib/curve";
-import { compact, duration, price } from "@/lib/format";
+import TokenCard from "@/components/TokenCard";
+import StatsStrip from "@/components/StatsStrip";
+import HowItWorks from "@/components/HowItWorks";
+import ActivityStrip from "@/components/ActivityStrip";
+import { ActivityItem, CurveView, listCurves, loadActivity, readProgram } from "@/lib/program";
+import { marketCapSol, progress } from "@/lib/curve";
 
 type Sort = "new" | "close" | "big";
 
@@ -15,6 +17,32 @@ export default function Home() {
   const [curves, setCurves] = useState<CurveView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sort, setSort] = useState<Sort>("new");
+  const [activity, setActivity] = useState<ActivityItem[] | null>(null);
+  const knownMints = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    knownMints.current = new Set((curves ?? []).map((c) => c.mint.toBase58()));
+  }, [curves]);
+
+  const curvesReady = curves !== null;
+  useEffect(() => {
+    // wait for the token list, so activity can be limited to tokens that exist on this network
+    if (!curvesReady) return;
+    let live = true;
+    const load = async () => {
+      try {
+        const items = await loadActivity(connection, readProgram(connection), 14, knownMints.current.size ? knownMints.current : undefined);
+        if (live) setActivity(items);
+      } catch {
+        /* the strip simply stays hidden if the network is slow */
+      }
+    };
+    load();
+    const t = setInterval(load, 30000);
+    return () => {
+      live = false;
+      clearInterval(t);
+    };
+  }, [connection, curvesReady]);
 
   useEffect(() => {
     let live = true;
@@ -69,6 +97,10 @@ export default function Home() {
         </div>
       </section>
 
+      <StatsStrip curves={curves} />
+      <HowItWorks />
+      <ActivityStrip items={activity} curves={curves} />
+
       <section id="tokens" className="list-wrap">
         <div className="list-head">
           <h2>Tokens</h2>
@@ -102,32 +134,11 @@ export default function Home() {
           </div>
         )}
 
-        <ul className="rows">
-          {sorted.map((c) => {
-            const p = progress(c.realTokens);
-            return (
-              <li key={c.address.toBase58()}>
-                <Link href={`/token/${c.mint.toBase58()}`} className="row">
-                  <Avatar id={c.mint.toBase58()} symbol={c.symbol} uri={c.uri} />
-                  <span className="row-name">
-                    <strong>{c.name}</strong>
-                    <span className="muted">{c.symbol}</span>
-                  </span>
-                  <span className="row-terms muted">
-                    {c.maxTaxBps / 100}% tax, 0 after {duration(c.decaySecs)}
-                  </span>
-                  <span className="row-bar" aria-label={`${Math.round(p * 100)} percent sold`}>
-                    <span style={{ width: `${Math.max(2, p * 100)}%` }} />
-                  </span>
-                  <span className="row-num">
-                    <strong>{compact(marketCapSol(c.vs, c.vt), 1)} SOL</strong>
-                    <span className="muted">{price(priceSol(c.vs, c.vt))} each</span>
-                  </span>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
+        <div className="tgrid">
+          {sorted.map((c) => (
+            <TokenCard key={c.address.toBase58()} c={c} />
+          ))}
+        </div>
       </section>
     </>
   );
