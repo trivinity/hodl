@@ -47,6 +47,7 @@ export default function TokenPage({ params }: { params: Promise<{ mint: string }
 
   const p = progress(curve.realTokens);
   const soldTokens = INIT_REAL_TOKENS - curve.realTokens;
+  const graduated = curve.graduatedStage >= 3;
 
   return (
     <div className="token">
@@ -65,16 +66,16 @@ export default function TokenPage({ params }: { params: Promise<{ mint: string }
 
         <dl className="stats">
           <div>
-            <dt>Price</dt>
+            <dt>{graduated ? "Price at graduation" : "Price"}</dt>
             <dd>{price(priceSol(curve.vs, curve.vt))} SOL</dd>
           </div>
           <div>
-            <dt>Market cap</dt>
+            <dt>{graduated ? "Cap at graduation" : "Market cap"}</dt>
             <dd>{compact(marketCapSol(curve.vs, curve.vt), 1)} SOL</dd>
           </div>
           <div>
             <dt>In the pool</dt>
-            <dd>{sol(curve.realSol, 2)} SOL</dd>
+            <dd>{sol(curve.lpSol > 0n ? curve.lpSol : curve.realSol, 2)} SOL</dd>
           </div>
           <div>
             <dt>Sold from curve</dt>
@@ -85,15 +86,17 @@ export default function TokenPage({ params }: { params: Promise<{ mint: string }
         <div className="bar" aria-label={`${Math.round(p * 100)} percent of the curve is sold`}>
           <span style={{ width: `${Math.max(1, p * 100)}%` }} />
         </div>
-        <p className="muted bar-note">{Math.round(p * 100)}% of the curve sold. Trading ends when it is full.</p>
+        <p className="muted bar-note">
+          {graduated ? "The curve sold out and the token moved to its Meteora pool." : `${Math.round(p * 100)}% of the curve sold. Trading ends when it is full.`}
+        </p>
 
-        <h2 className="h2">The rules for this token</h2>
+        <h2 className="h2">{graduated ? "The rules this token had on the curve" : "The rules for this token"}</h2>
         <TaxMelt
           maxBps={curve.maxTaxBps}
           decaySecs={curve.decaySecs}
           heldSecs={held ?? undefined}
           scrub
-          caption={`Sell tax starts at ${curve.maxTaxBps / 100}% and reaches 0 after ${duration(curve.decaySecs)}. Each wallet can sell ${curve.holderSellBps / 100}% of its tokens per ${duration(curve.windowSecs)}. ${curve.rewardBps / 100}% of every sell tax is paid out to holders. Trade fee: ${curve.feeBps / 100}% to the creator${curve.holderFeeBps > 0 ? ` and ${curve.holderFeeBps / 100}% to holders` : ""}. Until this token graduates it can only be bought and sold here: it cannot be sent to another wallet or traded on another exchange.`}
+          caption={`Sell tax starts at ${curve.maxTaxBps / 100}% and reaches 0 after ${duration(curve.decaySecs)}. Each wallet can sell ${curve.holderSellBps / 100}% of its tokens per ${duration(curve.windowSecs)}. ${curve.rewardBps / 100}% of every sell tax is paid out to holders. Trade fee: ${curve.feeBps / 100}% to the creator${curve.holderFeeBps > 0 ? ` and ${curve.holderFeeBps / 100}% to holders` : ""}. ${graduated ? "These rules ended when the token graduated: it now trades freely on its Meteora pool." : "Until this token graduates it can only be bought and sold here: it cannot be sent to another wallet or traded on another exchange."}`}
         />
 
         <h2 className="h2">Recent trades</h2>

@@ -4,7 +4,7 @@ import { sol } from "@/lib/format";
 /** three live numbers, all read from the chain */
 export default function StatsStrip({ curves }: { curves: CurveView[] | null }) {
   const n = curves?.length ?? 0;
-  const inPools = (curves ?? []).reduce((a, c) => a + c.realSol, 0n);
+  const inPools = (curves ?? []).reduce((a, c) => a + (c.lpSol > 0n ? c.lpSol : c.realSol), 0n);
   const waiting = (curves ?? []).reduce((a, c) => a + c.rewardPool, 0n);
   const items: [string, string][] = [
     ["Tokens launched", curves ? String(n) : "…"],

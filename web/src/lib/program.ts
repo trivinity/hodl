@@ -85,6 +85,9 @@ export type CurveView = {
   rewardPool: bigint;
   /** 0 = on the curve, 1 and 2 = graduating, 3 = graduated (trades on a Meteora pool) */
   graduatedStage: number;
+  /** SOL and tokens put into the Meteora pool (0 until graduation) */
+  lpSol: bigint;
+  lpTokens: bigint;
   pool: PublicKey;
 };
 
@@ -116,6 +119,8 @@ export function toCurveView(address: PublicKey, c: any): CurveView {
     accPerToken: b(c.accPerToken),
     rewardPool: b(c.rewardPool),
     graduatedStage: c.graduatedStage,
+    lpSol: b(c.lpSol),
+    lpTokens: b(c.lpTokens),
     pool: c.pool,
   };
 }
