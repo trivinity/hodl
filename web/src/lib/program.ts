@@ -294,3 +294,21 @@ export async function loadActivity(
   }
   return out.sort((a, c) => c.ts - a.ts).slice(0, limit);
 }
+
+export type MyPosition = PositionView & { mint: PublicKey };
+
+/** every position (one per token) this wallet has ever opened */
+export async function listPositions(program: anchor.Program<any>, owner: PublicKey): Promise<MyPosition[]> {
+  // memcmp offset 8 = right after the 8 byte account discriminator, where the owner address starts
+  const all = await (program.account as any).position.all([{ memcmp: { offset: 8, bytes: owner.toBase58() } }]);
+  return all.map((a: any) => ({
+    mint: a.account.mint as PublicKey,
+    avgTs: b(a.account.avgTs),
+    tracked: b(a.account.tracked),
+    windowStart: b(a.account.windowStart),
+    windowBase: b(a.account.windowBase),
+    windowSold: b(a.account.windowSold),
+    rewardDebt: b(a.account.rewardDebt),
+    pendingRewards: b(a.account.pendingRewards),
+  }));
+}

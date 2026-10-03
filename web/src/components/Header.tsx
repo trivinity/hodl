@@ -58,6 +58,7 @@ export default function Header() {
       <nav className="nav">
         <Link href="/">Tokens</Link>
         <Link href="/create">Launch</Link>
+        <Link href="/earnings">Earnings</Link>
       </nav>
       <span className="net" title="Network this site is talking to">
         {CLUSTER_LABEL}

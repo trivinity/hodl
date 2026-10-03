@@ -1342,3 +1342,49 @@ input:focus {
   padding: 8px 16px;
   border-bottom: 1px solid var(--line);
 }
+
+/* ---------- earnings page ---------- */
+.earn .h1 {
+  margin-bottom: 20px;
+}
+.earn-strip {
+  margin-bottom: 20px;
+}
+.earn-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 28px;
+}
+.earn-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.4fr) repeat(3, minmax(120px, 1fr)) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 14px 18px;
+}
+.earn-token {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.earn-cell {
+  display: flex;
+  flex-direction: column;
+  font-size: 13.5px;
+}
+.earn-cell strong {
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: 15px;
+}
+@media (max-width: 900px) {
+  .earn-row {
+    grid-template-columns: 1fr 1fr;
+  }
+  .earn-token {
+    grid-column: 1 / -1;
+  }
+}

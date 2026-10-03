@@ -53,7 +53,7 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
 - [ ] LOW  CURVE_ACCOUNT_SIZE in web/src/lib/program.ts is hardcoded. Update if the Curve struct changes
 - [ ] HIGH (before mainnet) Professional audit, legal review, multisig upgrade authority
 
-- [ ] UX  A wallet that moves all its tokens away forfeits rewards it had not claimed yet. Site must warn: claim before moving tokens
+- [x] (obsolete now that tokens cannot be moved) UX warning about claiming before moving tokens
 
 - [ ] PARKED (decided: not needed initially): put the upgrade authority, admin and treasury under a multisig. Guide ready in docs/MULTISIG.md. Until then ONE wallet controls upgrades and the admin powers. Do before mainnet.
 - [x] Devnet UPGRADED to the current program (extended to 355,000 bytes; config set up with a 1% fee and treasury 7EFW2Z5tBJAQ82VYRbUQJUMsURo6pv72nj5hao9vYJro; admin = the devnet-only deploy key FZY4Wv26C5nzsFVL6JWGypP2xB1pesYUBfkZ6eFseiUf).
@@ -61,7 +61,7 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
 
 ## Open: product
 - [x] Richer home page: live numbers strip, how-it-works, live activity strip, token cards with a mini tax-fade drawing and rules (price sparkline NOT built; needs trade history per token)
-- [ ] "My earnings" page: everything you can claim across tokens
+- [x] "Your earnings" page (/earnings): every token you hold, current sell tax, what it is worth, claimable rewards, Claim and Claim all (3 per transaction). Claim math checked against a real batched claim (within 19 lamports of rounding). Wallet clicking NOT tested by me; needs your check in Phantom.
 - [ ] Holder-first discovery: sort by SOL paid to holders, share who kept holding
 - [ ] Private Vercel preview on devnet: the connector got 403 creating the project, so follow docs/VERCEL.md by hand (site builds cleanly with the devnet settings; verified)
 - [ ] DEX graduation. DIRECTION ADOPTED: tokens graduate into a Meteora DAMM v2 pool; the personal hold-time tax and
