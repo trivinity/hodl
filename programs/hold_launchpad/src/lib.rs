@@ -5,14 +5,18 @@ use anchor_lang::solana_program::{
     program::{invoke, invoke_signed},
 };
 use anchor_spl::associated_token::{self, AssociatedToken, Create as CreateAta};
+use anchor_spl::token::{self as classic, CloseAccount, SyncNative, Token};
 use anchor_spl::token_2022::Token2022;
 use anchor_spl::token_interface::{
-    self, metadata_pointer_initialize, spl_token_2022, token_metadata_initialize, transfer_hook_initialize, InitializeMint2, Mint,
-    MetadataPointerInitialize, MintTo, SetAuthority, TokenAccount, TokenMetadataInitialize, TransferHookInitialize,
+    self, metadata_pointer_initialize, spl_token_2022, token_metadata_initialize, transfer_hook_initialize, transfer_hook_update, InitializeMint2,
+    Mint, MetadataPointerInitialize, MintTo, SetAuthority, TokenAccount, TokenMetadataInitialize, TransferChecked, TransferHookInitialize,
+    TransferHookUpdate,
 };
 use spl_token_2022::{extension::ExtensionType, instruction::AuthorityType};
 
+pub mod graduation;
 pub mod math;
+use graduation::*;
 use math::*;
 
 // placeholder, run `anchor keys sync` after the first build
@@ -115,6 +119,12 @@ pub mod hold_launchpad {
         curve.total_tracked = 0;
         curve.acc_per_token = 0;
         curve.reward_pool = 0;
+        curve.graduated_stage = 0;
+        curve.lp_sol = 0;
+        curve.lp_tokens = 0;
+        curve.pool = Pubkey::default();
+        curve.position_nft_mint = Pubkey::default();
+        curve.lp_liquidity = 0;
 
         let seeds: &[&[u8]] = &[CURVE_SEED, mint_key.as_ref(), &[bump]];
         let signer = &[seeds];
@@ -267,6 +277,7 @@ pub mod hold_launchpad {
         require!(!ctx.accounts.config.paused, LaunchError::Paused);
         let curve = &ctx.accounts.curve;
         require!(!curve.complete, LaunchError::CurveComplete);
+        require!(curve.graduated_stage == 0, LaunchError::AlreadyGraduating);
 
         let q = buy_quote(
             curve.virtual_sol,
@@ -371,6 +382,8 @@ pub mod hold_launchpad {
     pub fn sell(ctx: Context<Sell>, tokens_in: u64, min_sol_out: u64) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
         let curve = &ctx.accounts.curve;
+        // once graduation starts the curve's funds are moving to the pool: selling here is over (holders trade on the pool)
+        require!(curve.graduated_stage == 0, LaunchError::AlreadyGraduating);
         // note: selling stays open after the curve fills. There is no graduation yet, so closing sells would lock everyone's SOL.
 
         let balance = ctx.accounts.seller_ata.amount;
@@ -536,6 +549,327 @@ pub mod hold_launchpad {
         Ok(())
     }
 
+    /// Graduation step 1 (anyone can call once a token is full): switch the transfer hook off for good, then move the
+    /// leftover tokens and the SOL raised (minus a small fixed setup cost) to the token's graduation address.
+    pub fn graduate_prepare(ctx: Context<GraduatePrepare>) -> Result<()> {
+        let mint_key = ctx.accounts.mint.key();
+        let curve_bump = ctx.accounts.curve.bump;
+        {
+            let c = &ctx.accounts.curve;
+            require!(c.complete, LaunchError::NotComplete);
+            require!(c.graduated_stage == 0, LaunchError::WrongStage);
+            require!(c.real_sol > SETUP_COST.saturating_mul(2), LaunchError::MathError);
+        }
+        let lp_tokens = ctx.accounts.vault.amount;
+        require!(lp_tokens > 0, LaunchError::MathError);
+        let lp_sol = ctx.accounts.curve.real_sol - SETUP_COST;
+
+        let curve_seeds: &[&[u8]] = &[CURVE_SEED, mint_key.as_ref(), &[curve_bump]];
+                let tp = ctx.accounts.token_program.to_account_info();
+        let tp_key = tp.key();
+        let classic_info = ctx.accounts.classic_token_program.to_account_info();
+        let mint_info = ctx.accounts.mint.to_account_info();
+        let curve_info = ctx.accounts.curve.to_account_info();
+        let grad_info = ctx.accounts.grad.to_account_info();
+        let grad_token = ctx.accounts.grad_token.to_account_info();
+        let grad_wsol = ctx.accounts.grad_wsol.to_account_info();
+        let sys = ctx.accounts.system_program.to_account_info();
+
+        // 1. switch the hook off: first the hook program, then the right to ever set one again
+        transfer_hook_update(
+            CpiContext::new_with_signer(
+                tp_key,
+                TransferHookUpdate { token_program_id: tp.clone(), mint: mint_info.clone(), authority: curve_info.clone() },
+                &[curve_seeds],
+            ),
+            None,
+        )?;
+        token_interface::set_authority(
+            CpiContext::new_with_signer(
+                tp_key,
+                SetAuthority { current_authority: curve_info.clone(), account_or_mint: mint_info.clone() },
+                &[curve_seeds],
+            ),
+            AuthorityType::TransferHookProgramId,
+            None,
+        )?;
+
+        // 2. token accounts for the graduation address (the caller pays their small rent; a few thousandths of a SOL)
+        associated_token::create_idempotent(CpiContext::new(
+            ctx.accounts.associated_token_program.key(),
+            CreateAta {
+                payer: ctx.accounts.caller.to_account_info(),
+                associated_token: grad_token.clone(),
+                authority: grad_info.clone(),
+                mint: mint_info.clone(),
+                system_program: sys.clone(),
+                token_program: tp.clone(),
+            },
+        ))?;
+        associated_token::create_idempotent(CpiContext::new(
+            ctx.accounts.associated_token_program.key(),
+            CreateAta {
+                payer: ctx.accounts.caller.to_account_info(),
+                associated_token: grad_wsol.clone(),
+                authority: grad_info.clone(),
+                mint: ctx.accounts.wsol_mint.to_account_info(),
+                system_program: sys.clone(),
+                token_program: classic_info.clone(),
+            },
+        ))?;
+
+        // 3. the tokens move first
+        token_interface::transfer_checked(
+            CpiContext::new_with_signer(
+                tp_key,
+                TransferChecked {
+                    from: ctx.accounts.vault.to_account_info(),
+                    mint: mint_info.clone(),
+                    to: grad_token.clone(),
+                    authority: curve_info.clone(),
+                },
+                &[curve_seeds],
+            ),
+            lp_tokens,
+            TOKEN_DECIMALS,
+        )?;
+
+        // 4. last, with no other program call after it (the runtime does not allow one): the SOL raised goes into the wrapped
+        //    SOL account (it is told to count it at the start of the next step), and the setup money goes to the graduation
+        //    address, where it pays Meteora's account rents
+        move_lamports(&curve_info, &grad_wsol, lp_sol)?;
+        move_lamports(&curve_info, &grad_info, SETUP_COST)?;
+
+        let c = &mut ctx.accounts.curve;
+        c.real_sol = c.real_sol.checked_sub(lp_sol + SETUP_COST).ok_or(LaunchError::MathError)?;
+        c.real_tokens = 0;
+        c.lp_sol = lp_sol;
+        c.lp_tokens = lp_tokens;
+        c.graduated_stage = 1;
+        emit!(GraduationStarted { mint: mint_key, lp_sol, lp_tokens });
+        Ok(())
+    }
+
+    /// Graduation step 2 (anyone can call): create the Meteora pool from the funds set aside, opening at the price those
+    /// funds imply. The caller supplies the price and liquidity numbers; the program checks them against the real funds.
+    pub fn graduate_create_pool(ctx: Context<GraduateCreatePool>, sqrt_price: u128, liquidity: u128) -> Result<()> {
+        let mint_key = ctx.accounts.mint.key();
+        let (lp_sol, lp_tokens) = {
+            let c = &ctx.accounts.curve;
+            require!(c.graduated_stage == 1, LaunchError::WrongStage);
+            (c.lp_sol, c.lp_tokens)
+        };
+        require!(liquidity > 0, LaunchError::MathError);
+        require!(price_matches(lp_sol, lp_tokens, sqrt_price), LaunchError::BadPrice);
+
+        // the SOL put into the wrapped SOL account in step 1 is counted now (this must be the first program call here)
+        classic::sync_native(CpiContext::new(
+            ctx.accounts.classic_token_program.key(),
+            SyncNative { account: ctx.accounts.grad_wsol.to_account_info() },
+        ))?;
+        ctx.accounts.grad_wsol.reload()?;
+        require!(ctx.accounts.grad_wsol.amount >= lp_sol, LaunchError::MathError);
+
+        let grad_seeds: &[&[u8]] = &[GRAD_SEED, mint_key.as_ref(), &[ctx.bumps.grad]];
+        let before_tokens = ctx.accounts.grad_token.amount;
+        let before_sol = ctx.accounts.grad_wsol.amount;
+
+        let grad = ctx.accounts.grad.to_account_info();
+        let ix = Instruction {
+            program_id: DAMM_PROGRAM_ID,
+            accounts: vec![
+                AccountMeta::new_readonly(grad.key(), false), // creator: owns the position
+                AccountMeta::new(ctx.accounts.position_nft_mint.key(), true),
+                AccountMeta::new(ctx.accounts.position_nft_account.key(), false),
+                AccountMeta::new(grad.key(), true), // payer
+                AccountMeta::new_readonly(DAMM_POOL_AUTHORITY, false),
+                AccountMeta::new(ctx.accounts.pool.key(), false),
+                AccountMeta::new(ctx.accounts.position.key(), false),
+                AccountMeta::new_readonly(mint_key, false), // token A: our token
+                AccountMeta::new_readonly(WSOL_MINT, false), // token B: wrapped SOL
+                AccountMeta::new(ctx.accounts.token_a_vault.key(), false),
+                AccountMeta::new(ctx.accounts.token_b_vault.key(), false),
+                AccountMeta::new(ctx.accounts.grad_token.key(), false),
+                AccountMeta::new(ctx.accounts.grad_wsol.key(), false),
+                AccountMeta::new_readonly(ctx.accounts.token_program.key(), false),
+                AccountMeta::new_readonly(ctx.accounts.classic_token_program.key(), false),
+                AccountMeta::new_readonly(ctx.accounts.token_program.key(), false), // Meteora's own Token-2022 slot
+                AccountMeta::new_readonly(ctx.accounts.system_program.key(), false),
+                AccountMeta::new_readonly(ctx.accounts.event_authority.key(), false),
+                AccountMeta::new_readonly(DAMM_PROGRAM_ID, false),
+            ],
+            data: init_pool_data(sqrt_price, liquidity),
+        };
+        invoke_signed(
+            &ix,
+            &[
+                grad.clone(),
+                ctx.accounts.position_nft_mint.to_account_info(),
+                ctx.accounts.position_nft_account.to_account_info(),
+                ctx.accounts.pool_authority.to_account_info(),
+                ctx.accounts.pool.to_account_info(),
+                ctx.accounts.position.to_account_info(),
+                ctx.accounts.mint.to_account_info(),
+                ctx.accounts.wsol_mint.to_account_info(),
+                ctx.accounts.token_a_vault.to_account_info(),
+                ctx.accounts.token_b_vault.to_account_info(),
+                ctx.accounts.grad_token.to_account_info(),
+                ctx.accounts.grad_wsol.to_account_info(),
+                ctx.accounts.token_program.to_account_info(),
+                ctx.accounts.classic_token_program.to_account_info(),
+                ctx.accounts.system_program.to_account_info(),
+                ctx.accounts.event_authority.to_account_info(),
+                ctx.accounts.damm_program.to_account_info(),
+            ],
+            &[grad_seeds],
+        )?;
+
+        // the pool must have taken (almost) everything we set aside, or someone tried to keep part of it back
+        ctx.accounts.grad_token.reload()?;
+        ctx.accounts.grad_wsol.reload()?;
+        require!(used_enough(before_tokens, ctx.accounts.grad_token.amount, lp_tokens), LaunchError::PoolNotFilled);
+        require!(used_enough(before_sol, ctx.accounts.grad_wsol.amount, lp_sol), LaunchError::PoolNotFilled);
+
+        let c = &mut ctx.accounts.curve;
+        c.pool = ctx.accounts.pool.key();
+        c.position_nft_mint = ctx.accounts.position_nft_mint.key();
+        c.lp_liquidity = liquidity;
+        c.graduated_stage = 2;
+        Ok(())
+    }
+
+    /// Graduation step 3 (anyone can call): lock the pool's liquidity for good. After this nobody can ever withdraw it.
+    pub fn graduate_lock(ctx: Context<GraduateLock>) -> Result<()> {
+        let mint_key = ctx.accounts.mint.key();
+        let liquidity = {
+            let c = &ctx.accounts.curve;
+            require!(c.graduated_stage == 2, LaunchError::WrongStage);
+            c.lp_liquidity
+        };
+        let grad_seeds: &[&[u8]] = &[GRAD_SEED, mint_key.as_ref(), &[ctx.bumps.grad]];
+        let ix = Instruction {
+            program_id: DAMM_PROGRAM_ID,
+            accounts: vec![
+                AccountMeta::new(ctx.accounts.pool.key(), false),
+                AccountMeta::new(ctx.accounts.position.key(), false),
+                AccountMeta::new_readonly(ctx.accounts.position_nft_account.key(), false),
+                AccountMeta::new_readonly(ctx.accounts.grad.key(), true), // owner
+                AccountMeta::new_readonly(ctx.accounts.event_authority.key(), false),
+                AccountMeta::new_readonly(DAMM_PROGRAM_ID, false),
+            ],
+            data: lock_data(liquidity),
+        };
+        invoke_signed(
+            &ix,
+            &[
+                ctx.accounts.pool.to_account_info(),
+                ctx.accounts.position.to_account_info(),
+                ctx.accounts.position_nft_account.to_account_info(),
+                ctx.accounts.grad.to_account_info(),
+                ctx.accounts.event_authority.to_account_info(),
+                ctx.accounts.damm_program.to_account_info(),
+            ],
+            &[grad_seeds],
+        )?;
+        let c = &mut ctx.accounts.curve;
+        c.graduated_stage = 3;
+        c.complete = true;
+        emit!(Graduated { mint: mint_key, pool: c.pool, lp_sol: c.lp_sol, lp_tokens: c.lp_tokens });
+        Ok(())
+    }
+
+    /// Anyone can call this. Collects the trading fees the locked pool has earned (always in SOL) and sends them to the
+    /// treasury address in the config. Nothing else can receive them.
+    pub fn claim_pool_fees(ctx: Context<ClaimPoolFees>) -> Result<()> {
+        let mint_key = ctx.accounts.mint.key();
+        require!(ctx.accounts.curve.graduated_stage == 3, LaunchError::WrongStage);
+        let grad_seeds: &[&[u8]] = &[GRAD_SEED, mint_key.as_ref(), &[ctx.bumps.grad]];
+        let grad = ctx.accounts.grad.to_account_info();
+        let classic_info = ctx.accounts.classic_token_program.to_account_info();
+
+        // the wrapped SOL account is closed after each payout, so make sure it exists (the graduation address pays)
+        associated_token::create_idempotent(CpiContext::new_with_signer(
+            ctx.accounts.associated_token_program.key(),
+            CreateAta {
+                payer: grad.clone(),
+                associated_token: ctx.accounts.grad_wsol.to_account_info(),
+                authority: grad.clone(),
+                mint: ctx.accounts.wsol_mint.to_account_info(),
+                system_program: ctx.accounts.system_program.to_account_info(),
+                token_program: classic_info.clone(),
+            },
+            &[grad_seeds],
+        ))?;
+
+        let ix = Instruction {
+            program_id: DAMM_PROGRAM_ID,
+            accounts: vec![
+                AccountMeta::new_readonly(DAMM_POOL_AUTHORITY, false),
+                AccountMeta::new_readonly(ctx.accounts.pool.key(), false),
+                AccountMeta::new(ctx.accounts.position.key(), false),
+                AccountMeta::new(ctx.accounts.grad_token.key(), false),
+                AccountMeta::new(ctx.accounts.grad_wsol.key(), false),
+                AccountMeta::new(ctx.accounts.token_a_vault.key(), false),
+                AccountMeta::new(ctx.accounts.token_b_vault.key(), false),
+                AccountMeta::new_readonly(mint_key, false),
+                AccountMeta::new_readonly(WSOL_MINT, false),
+                AccountMeta::new_readonly(ctx.accounts.position_nft_account.key(), false),
+                AccountMeta::new_readonly(grad.key(), true), // owner
+                AccountMeta::new_readonly(ctx.accounts.token_program.key(), false),
+                AccountMeta::new_readonly(classic_info.key(), false),
+                AccountMeta::new_readonly(ctx.accounts.event_authority.key(), false),
+                AccountMeta::new_readonly(DAMM_PROGRAM_ID, false),
+            ],
+            data: DISC_CLAIM_POSITION_FEE.to_vec(),
+        };
+        invoke_signed(
+            &ix,
+            &[
+                ctx.accounts.pool_authority.to_account_info(),
+                ctx.accounts.pool.to_account_info(),
+                ctx.accounts.position.to_account_info(),
+                ctx.accounts.grad_token.to_account_info(),
+                ctx.accounts.grad_wsol.to_account_info(),
+                ctx.accounts.token_a_vault.to_account_info(),
+                ctx.accounts.token_b_vault.to_account_info(),
+                ctx.accounts.mint.to_account_info(),
+                ctx.accounts.wsol_mint.to_account_info(),
+                ctx.accounts.position_nft_account.to_account_info(),
+                grad.clone(),
+                ctx.accounts.token_program.to_account_info(),
+                classic_info.clone(),
+                ctx.accounts.event_authority.to_account_info(),
+                ctx.accounts.damm_program.to_account_info(),
+            ],
+            &[grad_seeds],
+        )?;
+
+        // how much SOL arrived: the token amount of the wrapped SOL account (bytes 64..72 of a token account)
+        let fees = {
+            let d = ctx.accounts.grad_wsol.try_borrow_data()?;
+            require!(d.len() >= 72, LaunchError::MathError);
+            u64::from_le_bytes(d[64..72].try_into().unwrap())
+        };
+        require!(fees > 0, LaunchError::NothingToClaim);
+
+        // turn it back into plain SOL (the account's rent stays with the graduation address) and pay the treasury
+        classic::close_account(CpiContext::new_with_signer(
+            classic_info.key(),
+            CloseAccount { account: ctx.accounts.grad_wsol.to_account_info(), destination: grad.clone(), authority: grad.clone() },
+            &[grad_seeds],
+        ))?;
+        system_program::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.system_program.key(),
+                SolTransfer { from: grad.clone(), to: ctx.accounts.treasury.to_account_info() },
+                &[grad_seeds],
+            ),
+            fees,
+        )?;
+        emit!(PoolFeesClaimed { mint: mint_key, amount: fees });
+        Ok(())
+    }
+
     /// One-time setup, only by the program's upgrade authority. The admin starts as that authority and can hand over to a multisig.
     pub fn init_config(ctx: Context<InitConfig>, treasury: Pubkey, platform_fee_bps: u16) -> Result<()> {
         require!(platform_fee_bps <= MAX_PLATFORM_FEE_BPS, LaunchError::BadParams);
@@ -628,6 +962,13 @@ pub mod hold_launchpad {
     }
 }
 
+/// Move lamports between two accounts in the same instruction (the sender must be owned by this program).
+fn move_lamports<'info>(from: &AccountInfo<'info>, to: &AccountInfo<'info>, amount: u64) -> Result<()> {
+    **from.try_borrow_mut_lamports()? = from.lamports().checked_sub(amount).ok_or(LaunchError::MathError)?;
+    **to.try_borrow_mut_lamports()? = to.lamports().checked_add(amount).ok_or(LaunchError::MathError)?;
+    Ok(())
+}
+
 /// Move tokens with Token-2022, passing along the extra accounts the transfer hook needs.
 /// (Anchor's own transfer helper does not forward them, so the instruction is built here.)
 #[allow(clippy::too_many_arguments)]
@@ -716,6 +1057,15 @@ pub struct Curve {
     pub acc_per_token: u128,
     /// lamports owed to holders and not yet claimed (held in the curve account, outside the price reserves)
     pub reward_pool: u64,
+    /// graduation progress: 0 not started, 1 funds moved and hook off, 2 pool created, 3 liquidity locked (done)
+    pub graduated_stage: u8,
+    /// SOL and tokens set aside for the pool at stage 1
+    pub lp_sol: u64,
+    pub lp_tokens: u64,
+    /// the Meteora pool, its position token, and the liquidity put in (set at stage 2)
+    pub pool: Pubkey,
+    pub position_nft_mint: Pubkey,
+    pub lp_liquidity: u128,
 }
 
 /// Per-wallet, per-token bookkeeping: hold clock + sell window.
@@ -900,6 +1250,27 @@ pub struct CurveCreated {
 }
 
 #[event]
+pub struct GraduationStarted {
+    pub mint: Pubkey,
+    pub lp_sol: u64,
+    pub lp_tokens: u64,
+}
+
+#[event]
+pub struct Graduated {
+    pub mint: Pubkey,
+    pub pool: Pubkey,
+    pub lp_sol: u64,
+    pub lp_tokens: u64,
+}
+
+#[event]
+pub struct PoolFeesClaimed {
+    pub mint: Pubkey,
+    pub amount: u64,
+}
+
+#[event]
 pub struct PauseChanged {
     pub paused: bool,
 }
@@ -932,6 +1303,214 @@ pub struct ClaimRewards<'info> {
         bump = position.bump
     )]
     pub position: Account<'info, Position>,
+}
+
+#[derive(Accounts)]
+pub struct GraduatePrepare<'info> {
+    #[account(mut)]
+    pub caller: Signer<'info>,
+
+    #[account(mut, seeds = [CURVE_SEED, mint.key().as_ref()], bump = curve.bump, has_one = mint)]
+    pub curve: Account<'info, Curve>,
+
+    /// writable: switching off the transfer hook changes the mint
+    #[account(mut)]
+    pub mint: InterfaceAccount<'info, Mint>,
+
+    #[account(mut, associated_token::mint = mint, associated_token::authority = curve, associated_token::token_program = token_program)]
+    pub vault: InterfaceAccount<'info, TokenAccount>,
+
+    /// CHECK: the graduation address: a plain system account that only this program can sign for
+    #[account(mut, seeds = [GRAD_SEED, mint.key().as_ref()], bump)]
+    pub grad: UncheckedAccount<'info>,
+
+    /// CHECK: the graduation address's token account, created here
+    #[account(mut)]
+    pub grad_token: UncheckedAccount<'info>,
+
+    /// CHECK: the graduation address's wrapped SOL account, created here
+    #[account(mut)]
+    pub grad_wsol: UncheckedAccount<'info>,
+
+    /// CHECK: pinned to the wrapped SOL mint
+    #[account(address = WSOL_MINT)]
+    pub wsol_mint: UncheckedAccount<'info>,
+
+    pub token_program: Program<'info, Token2022>,
+    pub classic_token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct GraduateCreatePool<'info> {
+    #[account(mut)]
+    pub caller: Signer<'info>,
+
+    #[account(mut, seeds = [CURVE_SEED, mint.key().as_ref()], bump = curve.bump, has_one = mint)]
+    pub curve: Account<'info, Curve>,
+
+    pub mint: InterfaceAccount<'info, Mint>,
+
+    /// CHECK: the graduation address
+    #[account(mut, seeds = [GRAD_SEED, mint.key().as_ref()], bump)]
+    pub grad: UncheckedAccount<'info>,
+
+    #[account(mut, token::mint = mint, token::authority = grad, token::token_program = token_program)]
+    pub grad_token: InterfaceAccount<'info, TokenAccount>,
+
+    #[account(mut, token::mint = wsol_mint, token::authority = grad, token::token_program = classic_token_program)]
+    pub grad_wsol: InterfaceAccount<'info, TokenAccount>,
+
+    /// pinned to the wrapped SOL mint
+    #[account(address = WSOL_MINT)]
+    pub wsol_mint: InterfaceAccount<'info, Mint>,
+
+    /// CHECK: the pool's position token (a new key that signs the transaction); Meteora creates it
+    #[account(mut, signer)]
+    pub position_nft_mint: UncheckedAccount<'info>,
+
+    /// CHECK: checked by Meteora
+    #[account(mut)]
+    pub position_nft_account: UncheckedAccount<'info>,
+
+    /// CHECK: pinned to Meteora's pool authority
+    #[account(address = DAMM_POOL_AUTHORITY)]
+    pub pool_authority: UncheckedAccount<'info>,
+
+    /// CHECK: checked by Meteora
+    #[account(mut)]
+    pub pool: UncheckedAccount<'info>,
+
+    /// CHECK: checked by Meteora
+    #[account(mut)]
+    pub position: UncheckedAccount<'info>,
+
+    /// CHECK: checked by Meteora
+    #[account(mut)]
+    pub token_a_vault: UncheckedAccount<'info>,
+
+    /// CHECK: checked by Meteora
+    #[account(mut)]
+    pub token_b_vault: UncheckedAccount<'info>,
+
+    /// CHECK: Meteora's event authority, a fixed address
+    #[account(constraint = event_authority.key() == damm_event_authority())]
+    pub event_authority: UncheckedAccount<'info>,
+
+    /// CHECK: pinned to Meteora's DAMM v2 program
+    #[account(address = DAMM_PROGRAM_ID)]
+    pub damm_program: UncheckedAccount<'info>,
+
+    pub token_program: Program<'info, Token2022>,
+    pub classic_token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct GraduateLock<'info> {
+    #[account(mut)]
+    pub caller: Signer<'info>,
+
+    #[account(mut, seeds = [CURVE_SEED, mint.key().as_ref()], bump = curve.bump, has_one = mint)]
+    pub curve: Account<'info, Curve>,
+
+    /// CHECK: only used to derive addresses
+    pub mint: UncheckedAccount<'info>,
+
+    /// CHECK: the graduation address
+    #[account(mut, seeds = [GRAD_SEED, mint.key().as_ref()], bump)]
+    pub grad: UncheckedAccount<'info>,
+
+    /// CHECK: must be the pool recorded when it was created
+    #[account(mut, address = curve.pool)]
+    pub pool: UncheckedAccount<'info>,
+
+    /// CHECK: the pool position, derived from the recorded position token
+    #[account(mut, seeds = [b"position", curve.position_nft_mint.as_ref()], bump, seeds::program = DAMM_PROGRAM_ID)]
+    pub position: UncheckedAccount<'info>,
+
+    /// CHECK: the account holding the position token
+    #[account(seeds = [b"position_nft_account", curve.position_nft_mint.as_ref()], bump, seeds::program = DAMM_PROGRAM_ID)]
+    pub position_nft_account: UncheckedAccount<'info>,
+
+    /// CHECK: Meteora's event authority, a fixed address
+    #[account(constraint = event_authority.key() == damm_event_authority())]
+    pub event_authority: UncheckedAccount<'info>,
+
+    /// CHECK: pinned to Meteora's DAMM v2 program
+    #[account(address = DAMM_PROGRAM_ID)]
+    pub damm_program: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
+pub struct ClaimPoolFees<'info> {
+    #[account(mut)]
+    pub caller: Signer<'info>,
+
+    #[account(seeds = [CURVE_SEED, mint.key().as_ref()], bump = curve.bump, has_one = mint)]
+    pub curve: Account<'info, Curve>,
+
+    #[account(seeds = [CONFIG_SEED], bump = config.bump)]
+    pub config: Account<'info, Config>,
+
+    pub mint: InterfaceAccount<'info, Mint>,
+
+    /// CHECK: the graduation address
+    #[account(mut, seeds = [GRAD_SEED, mint.key().as_ref()], bump)]
+    pub grad: UncheckedAccount<'info>,
+
+    #[account(mut, token::mint = mint, token::authority = grad, token::token_program = token_program)]
+    pub grad_token: InterfaceAccount<'info, TokenAccount>,
+
+    /// CHECK: the graduation address's wrapped SOL account (created again if needed)
+    #[account(mut)]
+    pub grad_wsol: UncheckedAccount<'info>,
+
+    /// CHECK: pinned to the wrapped SOL mint
+    #[account(address = WSOL_MINT)]
+    pub wsol_mint: UncheckedAccount<'info>,
+
+    /// CHECK: pinned to Meteora's pool authority
+    #[account(address = DAMM_POOL_AUTHORITY)]
+    pub pool_authority: UncheckedAccount<'info>,
+
+    /// CHECK: must be the recorded pool
+    #[account(address = curve.pool)]
+    pub pool: UncheckedAccount<'info>,
+
+    /// CHECK: the pool position
+    #[account(mut, seeds = [b"position", curve.position_nft_mint.as_ref()], bump, seeds::program = DAMM_PROGRAM_ID)]
+    pub position: UncheckedAccount<'info>,
+
+    /// CHECK: the account holding the position token
+    #[account(seeds = [b"position_nft_account", curve.position_nft_mint.as_ref()], bump, seeds::program = DAMM_PROGRAM_ID)]
+    pub position_nft_account: UncheckedAccount<'info>,
+
+    /// CHECK: checked by Meteora
+    #[account(mut)]
+    pub token_a_vault: UncheckedAccount<'info>,
+
+    /// CHECK: checked by Meteora
+    #[account(mut)]
+    pub token_b_vault: UncheckedAccount<'info>,
+
+    /// CHECK: where the fees go: exactly the treasury in the config
+    #[account(mut, address = config.treasury)]
+    pub treasury: UncheckedAccount<'info>,
+
+    /// CHECK: Meteora's event authority, a fixed address
+    #[account(constraint = event_authority.key() == damm_event_authority())]
+    pub event_authority: UncheckedAccount<'info>,
+
+    /// CHECK: pinned to Meteora's DAMM v2 program
+    #[account(address = DAMM_PROGRAM_ID)]
+    pub damm_program: UncheckedAccount<'info>,
+
+    pub token_program: Program<'info, Token2022>,
+    pub classic_token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
@@ -1007,4 +1586,14 @@ pub enum LaunchError {
     Unauthorized,
     #[msg("You are not the proposed admin")]
     NotPendingAdmin,
+    #[msg("This token is not full yet, so it cannot graduate")]
+    NotComplete,
+    #[msg("Graduation is not at the right step for this")]
+    WrongStage,
+    #[msg("The opening price does not match the funds in the pool")]
+    BadPrice,
+    #[msg("The pool did not take all the funds, so it was cancelled")]
+    PoolNotFilled,
+    #[msg("This token is graduating: trading on the curve is over")]
+    AlreadyGraduating,
 }

@@ -64,14 +64,12 @@ Status: `[x]` done, `[ ]` open. Severity: HIGH / MED / LOW.
 - [x] "Your earnings" page (/earnings): every token you hold, current sell tax, what it is worth, claimable rewards, Claim and Claim all (3 per transaction). Claim math checked against a real batched claim (within 19 lamports of rounding). Wallet clicking NOT tested by me; needs your check in Phantom.
 - [ ] Holder-first discovery: sort by SOL paid to holders, share who kept holding
 - [ ] Private Vercel preview on devnet: the connector got 403 creating the project, so follow docs/VERCEL.md by hand (site builds cleanly with the devnet settings; verified)
-- [ ] DEX graduation. DIRECTION ADOPTED: tokens graduate into a Meteora DAMM v2 pool; the personal hold-time tax and
-      sell limits apply on our curve only. What carries over: a decaying fee for everyone (fee scheduler, 99% max so our 30% start fits),
-      fees paid to holders via a permanently locked LP position owned by our program, anti-snipe from the high starting fee.
-      Checked in Meteora docs: fee scheduler limits (fine), permanent lock still earns claimable fees (fine).
-      Still to prove on devnet: a program-owned account holding the position NFT can claim the fees (docs say claims can be delegated).
-      Still to design: how to split the fees among holders without our curve seeing balances
-      (options: pay by balance at claim time, which brings back flash-hold; or periodic snapshots, which is heavier).
-      Also needed: the UI must label each token's phase (on our curve vs graduated) so nobody assumes the rules still apply.
+- [x] GRADUATION built and tested on a local chain with Meteora's real program (copied from devnet): 3 steps, anyone can run them once a token is full.
+      Step 1 switches the transfer hook off for good and sets the funds aside (0.05 SOL setup cost comes out of the SOL raised); step 2 creates the Meteora pool at the price the funds imply (fading fee 30% to about 1% over 7 days, fees collected in SOL); step 3 locks the liquidity permanently.
+      Safety checks tested: wrong opening price rejected, too little liquidity rejected (cannot keep funds back), steps cannot be repeated or skipped, curve trading stops, holders can transfer freely afterwards, pool fees can only go to the treasury.
+      Decisions made by the owner: pool fees go to the treasury; setup cost taken from the SOL raised.
+      STILL TO DO: website (graduate button, graduated state, link to trade on the pool), indexer events, devnet upgrade (program is now 463 KB: costs about 2.4 SOL of temporary buffer plus about 0.5 SOL to extend, the devnet deploy key has about 1.8 SOL), size reduction ideas, real-wallet test of the 3 steps.
+      Notes: needs a test chain with Meteora's program (see tests/graduation.cts); `anchor build -p hold_launchpad` builds the main program (a plain `anchor build` also builds the hook but prints a harmless 'IDL doesn't exist' for it).
 - [ ] Price chart
 
 - [x] Supabase project "hodl" created (free tier, us-east-1, ref puamkthzhgibhzfjrktl) and the schema applied. Security advisor: clean (one INFO about indexer_state having no policies, which is intended).
