@@ -21,7 +21,7 @@ Token launchpad on Solana where the sell tax melts to zero the longer you hold.
 1. Terminal 1: `solana-test-validator --reset --limit-ledger-size 10000 --url devnet --clone-upgradeable-program cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG` (copies Meteora's program from devnet, needed for the graduation tests)
 2. Terminal 2, project root:
    ```
-   anchor keys sync && anchor build -p hold_launchpad && anchor build -p hodl_hook
+   anchor keys sync && anchor build   # prints a harmless "IDL doesn't exist" for the hook; use -p hold_launchpad to build only the main program
    solana config set --url localhost
    solana airdrop 100
    anchor program deploy target/deploy/hold_launchpad.so --program-name hold_launchpad --provider.cluster localnet
